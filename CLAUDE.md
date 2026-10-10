@@ -1,0 +1,30 @@
+# LoadoutSwitchCombatProto
+
+UE 5.8 C++ prototype for a contextual-combo + loadout-switch action combat system (KH-style position-driven combos, DMC-style mid-combo style switching).
+
+Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb-acd3-2f00315a7b5d
+
+## Key design decisions
+- One attack button resolves to a move from context. Grid = stance (Ground/Air) x range (Close/Far, no Mid) x target count (Single/Crowd) = 8 cells, plus situational slots: Riser, Post-dodge, Swap-in, Launcher, Finisher (ground/air).
+- Resolver priority: Swap-in > Post-dodge > Riser > Finisher > grid cell > weapon basic attack. The priority order must be designer-editable data (a data asset), never hard-coded.
+- Loadout = weapon + slotted abilities. Each loadout has its OWN AP budget (start 10 AP); players start with 2 loadout slots, unlock a 3rd later.
+- Swap: one button, ~0.1 s, cancels recovery of connected hits only, combo counter / air state / target carry over. Off-hand charge powers the Swap-in ability.
+- Enemies have poise tiers (Unarmored / Armored / Juggernaut); abilities have stagger power. Both designer-editable.
+- Hard lock: R3 toggles, right stick switches target while locked (Dark Souls style). All bindings remappable via Enhanced Input user settings.
+
+## Architecture (planned)
+- Combat Context component: builds a Gameplay Tag container (tags in Config/DefaultGameplayTags.ini).
+- Loadout component: equipped loadouts, active index, combo counter, off-hand charge.
+- Resolver: buffered input -> context -> priority order -> slot lookup -> activate GAS ability.
+- Data assets: Loadout, Ability Definition (ability class, montage, AP cost, allowed weapon classes, warp settings, damage, stagger).
+- Base context-attack Gameplay Ability: plays montage, sets motion-warp target, applies damage via Gameplay Effect.
+- Animation notify windows: hit, combo, dodge-cancel, swap-cancel, motion warp.
+
+## Milestones
+1. One loadout, eight-cell grid, resolver + debug overlay (live context tags + resolved ability). Exit: each cell visibly different, reticle predicts it.
+2+. See design doc. Second loadout + swap is milestone 4; stop and rework if swap isn't fun against a dummy.
+
+## Conventions
+- Prototype animations: Paragon (Greystone/Kallari/Sparrow), Game Animation Sample, Mixamo; retarget to UE5 mannequin.
+- Git + LFS. Never commit Binaries/, Intermediate/, Saved/, DerivedDataCache/.
+- Build: Development Editor | Win64.
