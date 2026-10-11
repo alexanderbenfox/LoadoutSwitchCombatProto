@@ -20,5 +20,8 @@ public class LoadoutSwitchCombatProto : ModuleRules
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
+
+		// lets files include each other by path from the module root, e.g. "Combat/CombatTags.h"
+		PublicIncludePaths.Add(ModuleDirectory);
 	}
 }

@@ -13,12 +13,16 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 - Hard lock: R3 toggles, right stick switches target while locked (Dark Souls style). All bindings remappable via Enhanced Input user settings.
 
 ## Architecture (planned)
-- Combat Context component: builds a Gameplay Tag container (tags in Config/DefaultGameplayTags.ini).
+- Combat Context component: builds a Gameplay Tag container (native tags in Source/.../Combat/CombatTags.h; the .ini is for content-only tags).
 - Loadout component: equipped loadouts, active index, combo counter, off-hand charge.
 - Resolver: buffered input -> context -> priority order -> slot lookup -> activate GAS ability.
 - Data assets: Loadout, Ability Definition (ability class, montage, AP cost, allowed weapon classes, warp settings, damage, stagger).
 - Base context-attack Gameplay Ability: plays montage, sets motion-warp target, applies damage via Gameplay Effect.
 - Animation notify windows: hit, combo, dodge-cancel, swap-cancel, motion warp.
+
+## Planned follow-ups
+- Target-airborne detection, quick fix: the dummy enemy is an `ACharacter`, so the context component's existing `IsFalling` check sees it in the air. Not a physics-body query; characters are moved kinematically by Character Movement.
+- Target-airborne detection, later: once enemies have an Ability System component, the enemy owns its combat state as tags and the context component reads those instead of movement state. Working names: `State.Floating` (launched, juggled or flying; a valid Riser / air-juggle target) and `State.Vulnerable` (staggered). The two can be held together, e.g. launched and staggered. The player's own stance stays on `IsFalling`.
 
 ## Milestones
 1. One loadout, eight-cell grid, resolver + debug overlay (live context tags + resolved ability). Exit: each cell visibly different, reticle predicts it.
