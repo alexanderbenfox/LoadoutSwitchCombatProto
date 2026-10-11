@@ -27,4 +27,7 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 ## Conventions
 - Prototype animations: Paragon (Greystone/Kallari/Sparrow), Game Animation Sample, Mixamo; retarget to UE5 mannequin.
 - Git + LFS. Never commit Binaries/, Intermediate/, Saved/, DerivedDataCache/.
-- Build: Development Editor | Win64.
+- Build: Development Editor | Win64. Engine is at `D:\UE_5.8`; from a shell:
+  `& "D:\UE_5.8\Engine\Build\BatchFiles\Build.bat" LoadoutSwitchCombatProtoEditor Win64 Development -project="<repo>\LoadoutSwitchCombatProto.uproject" -waitmutex`
+  (always go through `Build.bat`, which uses the engine's bundled .NET; calling `UnrealBuildTool.exe` directly fails on this machine).
+- Toolchain: needs MSVC 14.44 (VS 2022 17.14). This machine's global `%APPDATA%\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml` pins 14.34 for older engines, so `Saved/UnrealBuildTool/BuildConfiguration.xml` (git-ignored) sets `CompilerVersion` to `Latest` for this project. Recreate it if `Saved/` is deleted.
