@@ -8,6 +8,7 @@
 class UAbilitySystemComponent;
 class UCameraComponent;
 class UCombatContextComponent;
+class UCombatResolverComponent;
 class UInputAction;
 class UInputMappingContext;
 class UMotionWarpingComponent;
@@ -42,6 +43,10 @@ class ACombatCharacter : public ACharacter, public IAbilitySystemInterface
 	/** Builds the context tags the resolver reads */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCombatContextComponent> CombatContext;
+
+	/** Picks a slot from the context using the priority rules */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCombatResolverComponent> CombatResolver;
 
 protected:
 

@@ -56,6 +56,11 @@ FGameplayTagContainer UCombatContextComponent::BuildContext() const
 	}
 
 	// TODO: Add context for crowd/single target - from the Target get something like UEnemyAIComponent and get the crowd proximity state from that
+	// for now only rerturn single
+	if (Target != nullptr)
+	{
+		Context.AddTag(CombatTags::Context_Target_Single);
+	}
 
 	// recent action
 	const double currTime = GetWorld()->GetTimeSeconds();

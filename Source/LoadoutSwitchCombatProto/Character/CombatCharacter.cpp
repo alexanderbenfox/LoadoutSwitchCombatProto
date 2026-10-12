@@ -2,6 +2,7 @@
 #include "AbilitySystemComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Combat/CombatContextComponent.h"
+#include "Combat/CombatResolverComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/LocalPlayer.h"
 #include "EnhancedInputComponent.h"
@@ -46,6 +47,7 @@ ACombatCharacter::ACombatCharacter()
 	AbilitySystem = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystem"));
 	MotionWarping = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 	CombatContext = CreateDefaultSubobject<UCombatContextComponent>(TEXT("CombatContext"));
+	CombatResolver = CreateDefaultSubobject<UCombatResolverComponent>(TEXT("CombatResolver"));
 }
 
 void ACombatCharacter::Tick(float DeltaSeconds)
