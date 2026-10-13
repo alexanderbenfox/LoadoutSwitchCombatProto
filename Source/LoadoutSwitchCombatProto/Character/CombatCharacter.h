@@ -8,6 +8,7 @@
 class UAbilitySystemComponent;
 class UCameraComponent;
 class UCombatContextComponent;
+class UCombatLoadoutComponent;
 class UCombatResolverComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -44,6 +45,10 @@ class ACombatCharacter : public ACharacter, public IAbilitySystemInterface
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCombatContextComponent> CombatContext;
 
+	/** Equipped loadouts and which one is active */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCombatLoadoutComponent> CombatLoadout;
+
 	/** Picks a slot from the context using the priority rules */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCombatResolverComponent> CombatResolver;
@@ -66,6 +71,9 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> MouseLookAction;
 
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<UInputAction> AttackAction;
+
 public:
 
 	ACombatCharacter();
@@ -82,6 +90,7 @@ protected:
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
+	void Attack();
 
 private:
 

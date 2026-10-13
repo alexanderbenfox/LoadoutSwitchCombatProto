@@ -12,6 +12,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "InputActionValue.h"
 #include "Kismet/GameplayStatics.h"
+#include "Loadout/CombatLoadoutComponent.h"
 #include "LoadoutSwitchCombatProto.h"
 #include "MotionWarpingComponent.h"
 
@@ -47,6 +48,7 @@ ACombatCharacter::ACombatCharacter()
 	AbilitySystem = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystem"));
 	MotionWarping = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 	CombatContext = CreateDefaultSubobject<UCombatContextComponent>(TEXT("CombatContext"));
+	CombatLoadout = CreateDefaultSubobject<UCombatLoadoutComponent>(TEXT("CombatLoadout"));
 	CombatResolver = CreateDefaultSubobject<UCombatResolverComponent>(TEXT("CombatResolver"));
 }
 
@@ -92,6 +94,8 @@ void ACombatCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::Look);
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::Look);
+
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACombatCharacter::Attack);
 	}
 	else
 	{
@@ -124,6 +128,11 @@ void ACombatCharacter::Look(const FInputActionValue& Value)
 		AddControllerYawInput(LookAxisVector.X);
 		AddControllerPitchInput(LookAxisVector.Y);
 	}
+}
+
+void ACombatCharacter::Attack()
+{
+	CombatResolver->HandleAttackPressed();
 }
 
 void ACombatCharacter::UpdatePlaceholderTarget()
