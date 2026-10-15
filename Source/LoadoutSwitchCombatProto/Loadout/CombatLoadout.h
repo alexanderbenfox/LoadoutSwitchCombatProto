@@ -19,6 +19,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Loadout")
 	UCombatAbilityDefinition* GetAbilityForSlot(FGameplayTag Slot) const;
 
+	UFUNCTION(BlueprintPure, Category = "Combat|Loadout")
+	UCombatAbilityDefinition* GetAssignedAbilityForSlot(FGameplayTag Slot) const;
+
 	/** Total AP cost of everything slotted */
 	UFUNCTION(BlueprintPure, Category = "Combat|Loadout")
 	int32 GetSpentAP() const;

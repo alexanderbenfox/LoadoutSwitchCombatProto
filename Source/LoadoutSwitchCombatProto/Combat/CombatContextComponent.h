@@ -55,13 +55,21 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Context|Range", meta = (ClampMin = 0, Units = "cm"))
 	float RangeHysteresis = 50.0f;
 
+	/** Enemies within this distance of the target count toward a crowd. Measured horizontally, like the range. */
+	UPROPERTY(EditAnywhere, Category = "Context|Crowd", meta = (ClampMin = 0, Units = "cm"))
+	float CrowdRadius = 400.0f;
+
+	/** This many enemies in the radius, the target included, makes it a Crowd; fewer is Single */
+	UPROPERTY(EditAnywhere, Category = "Context|Crowd", meta = (ClampMin = 1))
+	int32 CrowdThreshold = 3;
+
 	UPROPERTY(EditAnywhere, Category = "Context|Windows", meta = (ClampMin = 0, Units = "s"))
 	float PostDodgeWindow = 0.4f;
 
 	UPROPERTY(EditAnywhere, Category = "Context|Windows", meta = (ClampMin = 0, Units = "s"))
 	float SwapInWindow = 0.5f;
 
-	/** Prints the live context tags and draws the two range-flip rings around the target */
+	/** Prints the live context tags and draws the two range-flip rings and the crowd radius around the target */
 	UPROPERTY(EditAnywhere, Category = "Context|Debug")
 	bool bShowDebug = true;
 
@@ -72,6 +80,9 @@ private:
 
 	/** Horizontal distance from the owner to the target, or a negative value with no target */
 	float GetDistanceToTarget() const;
+
+	/** How many enemies are within CrowdRadius of the target, the target included; 0 with no target */
+	int32 CountEnemiesNearTarget() const;
 
 	void DrawDebug() const;
 

@@ -3,14 +3,27 @@
 
 UCombatAbilityDefinition* UCombatLoadout::GetAbilityForSlot(FGameplayTag Slot) const
 {
-	const TObjectPtr<UCombatAbilityDefinition>* slotDefinition = SlotAbilities.Find(Slot);
-	if ( slotDefinition && *slotDefinition )
+	UCombatAbilityDefinition* assignedAbility = GetAssignedAbilityForSlot(Slot);
+	if (assignedAbility)
 	{
-		return *slotDefinition;
+		return assignedAbility;
 	}
 
 	return BasicAttack;
 }
+
+
+UCombatAbilityDefinition* UCombatLoadout::GetAssignedAbilityForSlot(FGameplayTag Slot) const
+{
+	const TObjectPtr<UCombatAbilityDefinition>* slotDefinition = SlotAbilities.Find(Slot);
+	if (slotDefinition && *slotDefinition)
+	{
+		return *slotDefinition;
+	}
+
+	return nullptr;
+}
+
 
 int32 UCombatLoadout::GetSpentAP() const
 {

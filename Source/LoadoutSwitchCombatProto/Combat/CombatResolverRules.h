@@ -35,6 +35,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Resolver")
 	FGameplayTag ResolveSlot(const FGameplayTagContainer& Context) const;
 
+	/**
+	 *  Every slot whose rule the context satisfies, highest priority first.
+	 *  The caller walks the list and takes the first slot the loadout has filled, so an empty slot falls through to the next rule.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Combat|Resolver")
+	TArray<FGameplayTag> GetMatchingSlots(const FGameplayTagContainer& Context) const;
+
+	/** The slot to use when no rule gave a filled slot */
+	FGameplayTag GetFallbackSlot() const { return FallbackSlot; }
+
 protected:
 
 	/** Highest priority first */

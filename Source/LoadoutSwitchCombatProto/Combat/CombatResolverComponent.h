@@ -10,6 +10,20 @@ class UCombatContextComponent;
 class UCombatLoadoutComponent;
 class UCombatResolverRules;
 
+/** What one attack press resolves to: the slot that won and the ability in it, taken from a single context snapshot */
+USTRUCT(BlueprintType)
+struct FCombatResolution
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Resolution")
+	FGameplayTag Slot;
+
+	/** Null when there is no loadout to resolve against */
+	UPROPERTY(BlueprintReadOnly, Category = "Resolution")
+	TObjectPtr<UCombatAbilityDefinition> Ability;
+};
+
 /**
  *  Turns the current context into a slot, using the priority order in a rules asset,
  *  then into the ability the active loadout has in that slot.
@@ -24,13 +38,12 @@ public:
 
 	UCombatResolverComponent();
 
-	/** The slot an attack press would resolve to right now */
+	/**
+	 *  What an attack press would resolve to right now. The one place slot and ability get decided:
+	 *  the highest-priority matching rule whose slot the active loadout has filled, else the fallback slot.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Combat|Resolver")
-	FGameplayTag ResolveSlot() const;
-
-	/** The ability an attack press would use right now, or null if there is no loadout */
-	UFUNCTION(BlueprintCallable, Category = "Combat|Resolver")
-	UCombatAbilityDefinition* ResolveAbility(FGameplayTag slot) const;
+	FCombatResolution Resolve() const;
 
 	/** Called by the character when the attack button goes down */
 	void HandleAttackPressed();
@@ -49,7 +62,18 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Resolver|Debug")
 	bool bShowDebug = true;
 
+	/** Marks the target with the ability the next attack press would use */
+	UPROPERTY(EditAnywhere, Category = "Resolver|Reticle")
+	bool bShowReticle = true;
+
+	/** How far above the target's origin the reticle sits */
+	UPROPERTY(EditAnywhere, Category = "Resolver|Reticle", meta = (Units = "cm"))
+	float ReticleHeight = 120.0f;
+
 private:
+
+	/** Draws the reticle on Target for the predicted ability; Ability can be null */
+	void DrawReticle(const AActor* Target, const UCombatAbilityDefinition* Ability) const;
 
 	/** The owner's context component, found at BeginPlay */
 	UPROPERTY(Transient)

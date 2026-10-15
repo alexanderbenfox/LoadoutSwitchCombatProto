@@ -14,3 +14,20 @@ FGameplayTag UCombatResolverRules::ResolveSlot(const FGameplayTagContainer& Cont
 
 	return FallbackSlot;
 }
+
+TArray<FGameplayTag> UCombatResolverRules::GetMatchingSlots(const FGameplayTagContainer& Context) const
+{
+	TArray<FGameplayTag> MatchingSlots;
+
+	// rules array in order of priority, so output array is in order of priority
+	for (int32 i = 0; i < Rules.Num(); i++)
+	{
+		const FCombatSlotRule& Rule = Rules[i];
+		if (Rule.Requirement.Matches(Context))
+		{
+			MatchingSlots.Add( Rule.Slot );
+		}
+	}
+
+	return MatchingSlots;
+}

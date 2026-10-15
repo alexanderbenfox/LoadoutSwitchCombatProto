@@ -5,12 +5,49 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
+#include "Kismet/GameplayStatics.h"
+
 namespace
 {
 	bool IsAirborne(const AActor* Actor)
 	{
 		const ACharacter* Character = Cast<ACharacter>(Actor);
 		return Character && Character->GetCharacterMovement()->IsFalling();
+	}
+
+	bool IsCrowdNearTarget(const UObject* WorldObj, const AActor* Target, float CrowdRadius, int32 CrowdThreshold)
+	{
+		// eventually replace this (or just the counting part) with querying an enemy registry and cache the result once per tick
+
+		if (CrowdThreshold == 0)
+		{
+			return true;
+		}
+
+		TArray<AActor*> Enemies;
+		UGameplayStatics::GetAllActorsWithTag(
+			WorldObj,           // world context: any object that lives in the world
+			TEXT("Enemy"),  // the actor tag to look for
+			Enemies);       // filled with every actor carrying that tag
+
+		int32 iCrowdNumber = 0;
+		for (const auto& Enemy : Enemies)
+		{
+			// count 2d distance for horizontal check only (can be very far apart Z, but thats fine for now we will fix that later)
+			const float fDist = FVector::Dist2D(Enemy->GetActorLocation(), Target->GetActorLocation());
+
+			// will want to add hysteresis for this later
+			if (fDist <= CrowdRadius)
+			{
+				iCrowdNumber++;
+				if (iCrowdNumber >= CrowdThreshold)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 }
 
@@ -55,11 +92,18 @@ FGameplayTagContainer UCombatContextComponent::BuildContext() const
 		Context.AddTag(CombatTags::Context_Target_Airborne);
 	}
 
-	// TODO: Add context for crowd/single target - from the Target get something like UEnemyAIComponent and get the crowd proximity state from that
-	// for now only rerturn single
+
+	// target crowd density
 	if (Target != nullptr)
 	{
-		Context.AddTag(CombatTags::Context_Target_Single);
+		if (IsCrowdNearTarget( GetWorld(), Target.Get(), CrowdRadius, CrowdThreshold))
+		{
+			Context.AddTag(CombatTags::Context_Target_Crowd);
+		}
+		else
+		{
+			Context.AddTag(CombatTags::Context_Target_Single);
+		}
 	}
 
 	// recent action
@@ -134,6 +178,37 @@ float UCombatContextComponent::GetDistanceToTarget() const
 	return TargetActor ? FVector::Dist2D(GetOwner()->GetActorLocation(), TargetActor->GetActorLocation()) : -1.0f;
 }
 
+int32 UCombatContextComponent::CountEnemiesNearTarget() const
+{
+	if( !Target.IsValid() )
+	{
+		return 0;
+	}
+
+	// eventually replace this (or just the counting part) with querying an enemy registry and cache the result once per tick
+
+	TArray<AActor*> Enemies;
+	UGameplayStatics::GetAllActorsWithTag(
+		GetWorld(),           // world context: any object that lives in the world
+		TEXT("Enemy"),  // the actor tag to look for
+		Enemies);       // filled with every actor carrying that tag
+
+	int32 iCrowdNumber = 0;
+	for (const auto& Enemy : Enemies)
+	{
+		// count 2d distance for horizontal check only (can be very far apart Z, but thats fine for now we will fix that later)
+		const float fDist = FVector::Dist2D(Enemy->GetActorLocation(), Target->GetActorLocation());
+
+		// will want to add hysteresis for this later
+		if (fDist <= CrowdRadius)
+		{
+			iCrowdNumber++;
+		}
+	}
+
+	return iCrowdNumber;
+}
+
 void UCombatContextComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -153,9 +228,9 @@ void UCombatContextComponent::DrawDebug() const
 
 	if (GEngine)
 	{
-		const FString Text = FString::Printf(TEXT("Target: %s  (%.0f cm, %s)\nContext: %s"),
+		const FString Text = FString::Printf(TEXT("Target: %s  (%.0f cm, %s, %d nearby)\nContext: %s"),
 			*GetNameSafe(TargetActor), GetDistanceToTarget(), *UEnum::GetDisplayValueAsText(RangeBand).ToString(),
-			*BuildContext().ToStringSimple());
+			CountEnemiesNearTarget(), *BuildContext().ToStringSimple());
 
 		// a fixed key replaces last frame's message instead of stacking a new line every tick
 		GEngine->AddOnScreenDebugMessage(static_cast<uint64>(GetUniqueID()), 0.0f, FColor::Cyan, Text);
@@ -174,5 +249,9 @@ void UCombatContextComponent::DrawDebug() const
 			false, -1.0f, 0, bClose ? 1.0f : 2.0f, FVector::ForwardVector, FVector::RightVector, false);
 		DrawDebugCircle(GetWorld(), TargetActor->GetActorLocation(), LeaveCloseRadius, 48, bClose ? BandColor : IdleColor,
 			false, -1.0f, 0, bClose ? 2.0f : 1.0f, FVector::ForwardVector, FVector::RightVector, false);
+
+		// crowd radius: enemies inside this ring count toward Context.Target.Crowd
+		DrawDebugCircle(GetWorld(), TargetActor->GetActorLocation(), CrowdRadius, 48, FColor::Magenta,
+			false, -1.0f, 0, 1.0f, FVector::ForwardVector, FVector::RightVector, false);
 	}
 }

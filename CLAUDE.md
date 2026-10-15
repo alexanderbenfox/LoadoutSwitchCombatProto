@@ -7,6 +7,7 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 ## Key design decisions
 - One attack button resolves to a move from context. Grid = stance (Ground/Air) x range (Close/Far, no Mid) x target count (Single/Crowd) = 8 cells, plus situational slots: Riser, Post-dodge, Swap-in, Launcher, Finisher (ground/air).
 - Resolver priority: Swap-in > Post-dodge > Riser > Finisher > grid cell > weapon basic attack. The priority order must be designer-editable data (a data asset), never hard-coded.
+- Fall-through: the resolver takes the first rule that matches the context AND whose slot the active loadout has filled; empty slots are skipped, else the fallback slot + basic attack. Fallbacks (e.g. Crowd cell -> general cell) come from row order in the rules asset, never from code. Rule Slot is an output label only; Requirement is the test. See README "How an attack press resolves".
 - Loadout = weapon + slotted abilities. Each loadout has its OWN AP budget (start 10 AP); players start with 2 loadout slots, unlock a 3rd later.
 - Swap: one button, ~0.1 s, cancels recovery of connected hits only, combo counter / air state / target carry over. Off-hand charge powers the Swap-in ability.
 - Enemies have poise tiers (Unarmored / Armored / Juggernaut); abilities have stagger power. Both designer-editable.
