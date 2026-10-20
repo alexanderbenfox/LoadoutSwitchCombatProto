@@ -20,10 +20,14 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 - Data assets: Loadout, Ability Definition (ability class, montage, AP cost, allowed weapon classes, warp settings, damage, stagger).
 - Base context-attack Gameplay Ability: plays montage, sets motion-warp target, applies damage via Gameplay Effect.
 - Animation notify windows: hit, combo, dodge-cancel, swap-cancel, motion warp.
+- Animation-driven directives: frame-specific gameplay (spawn projectile, magnetize) is placed as Anim Notifies on the montage. Motion warping uses the built-in Motion Warping notify state. Custom notifies send a Gameplay Event (`Event.*` tag) to the owner's ASC; the active ability listens with WaitGameplayEvent, so notifies stay dumb and the logic lives in the ability. Example: the throw ability spawns its projectile on `Event.Throw.Release` and grants a `State.WeaponThrown` tag that attack abilities list as Activation Blocked; the returning projectile removes the tag and triggers a catch montage.
 
 ## Planned follow-ups
 - Target-airborne detection, quick fix: the dummy enemy is an `ACharacter`, so the context component's existing `IsFalling` check sees it in the air. Not a physics-body query; characters are moved kinematically by Character Movement.
 - Target-airborne detection, later: once enemies have an Ability System component, the enemy owns its combat state as tags and the context component reads those instead of movement state. Working names: `State.Floating` (launched, juggled or flying; a valid Riser / air-juggle target) and `State.Vulnerable` (staggered). The two can be held together, e.g. launched and staggered. The player's own stance stays on `IsFalling`.
+
+- Soft-target selection biased by camera facing: the placeholder picks the nearest enemy, so a lunge can go to one behind the player. Score candidates by distance and by angle to the camera's forward vector (hard lock overrides this).
+- Lock-on indicator shows what the press will do: the lock-on symbol itself changes to show whether the resolved attack is a Close move, a Far move, or will miss (target out of the resolved move's reach). Replaces the debug reticle; reads from the same `Resolve()` prediction so indicator and press never disagree.
 
 ## Milestones
 1. One loadout, eight-cell grid, resolver + debug overlay (live context tags + resolved ability). Exit: each cell visibly different, reticle predicts it.

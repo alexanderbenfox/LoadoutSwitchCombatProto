@@ -48,6 +48,9 @@ public:
 	/** Called by the character when the attack button goes down */
 	void HandleAttackPressed();
 
+	/** Called by a Combat Lunge notify window on the playing montage; lunges for the ability that montage belongs to */
+	void HandleLungeWindowBegin(float Duration);
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
@@ -70,10 +73,31 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Resolver|Reticle", meta = (Units = "cm"))
 	float ReticleHeight = 120.0f;
 
+	/** Buffer time before ability time has finished to buffer another ability **/
+	UPROPERTY(EditAnywhere, Category = "Resolver|Buffer", meta = (Units = "s"))
+	float BufferTime = 0.1f;
+
 private:
+
+	/**
+	 *  Plays the ability's montage on the owning character. Stand-in for activating a GAS ability,
+	 *  which will take over montage playback once the base context-attack ability exists.
+	 *  Returns false if nothing was played
+	 */
+	bool PlayAbilityMontage(const UCombatAbilityDefinition* Ability) const;
+
+	/**
+	 *  Turns the owner to face the context target and moves it towards the target with a root motion source,
+	 *  using the ability's lunge settings, over Duration seconds. Does nothing if the ability doesn't lunge or there's no target.
+	 *  Stand-in for the GAS ApplyRootMotionMoveToActorForce task.
+	 */
+	void StartLunge(const UCombatAbilityDefinition* Ability, float Duration) const;
 
 	/** Draws the reticle on Target for the predicted ability; Ability can be null */
 	void DrawReticle(const AActor* Target, const UCombatAbilityDefinition* Ability) const;
+
+	/** Returns 0.f when no ability active **/
+	float GetCurrentAbilityTimeRemaining() const;
 
 	/** The owner's context component, found at BeginPlay */
 	UPROPERTY(Transient)
@@ -82,4 +106,12 @@ private:
 	/** The owner's loadout component, found at BeginPlay */
 	UPROPERTY(Transient)
 	TObjectPtr<UCombatLoadoutComponent> LoadoutComponent;
+
+	bool bAbilityQueued = false;
+	bool bAbilityActive = false;
+
+	/** The ability whose montage was last played, so notifies on that montage know which ability they belong to */
+	UPROPERTY(Transient)
+	TObjectPtr<const UCombatAbilityDefinition> ActiveAbility;
+
 };

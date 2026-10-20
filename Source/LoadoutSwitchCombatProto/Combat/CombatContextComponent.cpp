@@ -9,7 +9,7 @@
 
 namespace
 {
-	bool IsAirborne(const AActor* Actor)
+	bool IsAirborne_Internal(const AActor* Actor)
 	{
 		const ACharacter* Character = Cast<ACharacter>(Actor);
 		return Character && Character->GetCharacterMovement()->IsFalling();
@@ -61,7 +61,7 @@ FGameplayTagContainer UCombatContextComponent::BuildContext() const
 	FGameplayTagContainer Context;
 
 	// Stance: what is the player's current state?
-	const bool bIsPlayerAirborne = IsAirborne(GetOwner());
+	const bool bIsPlayerAirborne = IsAirborne();
 	if (bIsPlayerAirborne)
 	{
 		Context.AddTag(CombatTags::Context_Stance_Air);
@@ -86,7 +86,7 @@ FGameplayTagContainer UCombatContextComponent::BuildContext() const
 	}
 
 	// target state
-	const bool bIsTargetAirborne = IsAirborne(Target.Get());
+	const bool bIsTargetAirborne = IsAirborne_Internal(Target.Get());
 	if (bIsTargetAirborne)
 	{
 		Context.AddTag(CombatTags::Context_Target_Airborne);
@@ -170,6 +170,11 @@ void UCombatContextComponent::NotifyDodged()
 void UCombatContextComponent::NotifySwapped()
 {
 	LastSwapTime = GetWorld()->GetTimeSeconds();
+}
+
+bool UCombatContextComponent::IsAirborne() const
+{
+	return IsAirborne_Internal(GetOwner());
 }
 
 float UCombatContextComponent::GetDistanceToTarget() const

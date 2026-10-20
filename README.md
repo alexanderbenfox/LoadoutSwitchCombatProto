@@ -42,6 +42,22 @@ This makes fallbacks a matter of row order, with no special cases in code:
 - Fall-through only skips rows. It never relaxes a requirement, so an empty Ground Far Crowd slot falls to Ground Far, never to Ground Close.
 - The same applies to the situational slots: with nothing in the Riser slot, a launched target falls through to the grid cell instead of the basic attack.
 
+## Third-party content
+
+Some assets come from Fab and are not stored in Git; a fresh clone needs them re-added before the project opens cleanly.
+
+| Pack | Folder (git-ignored) | How to get it |
+|---|---|---|
+| Paragon: Greystone (Epic, free) | `Content/ParagonGreystone/` | Add it to your Fab library, then in the Epic Games Launcher: Unreal Engine > Library > Fab > Paragon: Greystone > **Add to Project** > `LoadoutSwitchCombatProto`. If 5.8 isn't offered, add it to a throwaway project on the newest version listed and use **Asset Actions > Migrate** to copy it into this project's `Content`. |
+| Paragon: Kallari (Epic, free) | `Content/ParagonKallari/` | Same as Greystone. |
+| Paragon: Kwang (Epic, free) | `Content/ParagonKwang/` | Same as Greystone. |
+
+Rules for working with these packs:
+
+- Never save our own work inside a pack folder; it would be ignored along with the pack. Montages, retargeted animations and Blueprints made from pack assets go in our folders, e.g. `Content/Combat/Animations`.
+- Set the Epic Games Launcher's vault cache (Settings > Edit Vault Cache Location) to a drive with room; packs are several GB each.
+- When adding a new pack, add its folder to `.gitignore` and a row to the table above.
+
 ## Version control notes
 
 - Never commit `Binaries/`, `Intermediate/`, `Saved/` or `DerivedDataCache/`. They're ignored.

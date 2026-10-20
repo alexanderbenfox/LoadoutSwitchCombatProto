@@ -43,6 +43,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat|Context")
 	void NotifySwapped();
 
+	UFUNCTION(BlueprintCallable, Category = "Combat|Context")
+	bool IsAirborne() const;
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:

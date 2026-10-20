@@ -23,8 +23,13 @@ Plugins/**/Intermediate/
 *.code-workspace
 compile_commands.json
 
+# Third-party Fab packs: re-add from Fab instead of storing them in Git (see README, "Third-party content").
+# Anything we make from them lives in our own folders, e.g. Content/Combat/Animations.
+Content/ParagonGreystone/
+Content/ParagonKallari/
+Content/ParagonKwang/
+
 # OS cruft
 Thumbs.db
 Desktop.ini
 .DS_Store
-Config/DefaultEngine.ini
