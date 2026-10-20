@@ -26,7 +26,7 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 - Target-airborne detection, quick fix: the dummy enemy is an `ACharacter`, so the context component's existing `IsFalling` check sees it in the air. Not a physics-body query; characters are moved kinematically by Character Movement.
 - Target-airborne detection, later: once enemies have an Ability System component, the enemy owns its combat state as tags and the context component reads those instead of movement state. Working names: `State.Floating` (launched, juggled or flying; a valid Riser / air-juggle target) and `State.Vulnerable` (staggered). The two can be held together, e.g. launched and staggered. The player's own stance stays on `IsFalling`.
 
-- Soft-target selection biased by camera facing: the placeholder picks the nearest enemy, so a lunge can go to one behind the player. Score candidates by distance and by angle to the camera's forward vector (hard lock overrides this).
+- Soft targeting: `ACombatCharacter::UpdateSoftTarget` scores enemies by distance plus angle off the camera's forward, with a switch margin against flicker. Move it into the Targeting component when hard lock is built (hard lock overrides it). Possible addition: bias by movement-stick direction while the stick is held.
 - Lock-on indicator shows what the press will do: the lock-on symbol itself changes to show whether the resolved attack is a Close move, a Far move, or will miss (target out of the resolved move's reach). Replaces the debug reticle; reads from the same `Resolve()` prediction so indicator and press never disagree.
 
 ## Milestones

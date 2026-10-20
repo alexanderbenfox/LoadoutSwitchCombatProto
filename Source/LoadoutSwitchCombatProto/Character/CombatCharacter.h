@@ -74,6 +74,22 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> AttackAction;
 
+	/** Enemies further away than this are never picked. Also scales the distance part of a candidate's score */
+	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 1, Units = "cm"))
+	float TargetMaxDistance = 2000.0f;
+
+	/**
+	 *  How much being off to the side of the camera's view counts against a candidate, compared with distance.
+	 *  0 picks the nearest enemy wherever it is; higher favours whatever the camera is pointing at.
+	 *  At 1, an enemy directly behind costs as much as one at TargetMaxDistance straight ahead.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 0))
+	float TargetAngleWeight = 1.0f;
+
+	/** A candidate has to beat the current target's score by this much to take over, so the target doesn't flicker between two similar enemies */
+	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 0))
+	float TargetSwitchMargin = 0.1f;
+
 public:
 
 	ACombatCharacter();
@@ -94,6 +110,12 @@ protected:
 
 private:
 
-	/** Stand-in until the Targeting component exists: targets the nearest actor carrying the "Enemy" actor tag */
-	void UpdatePlaceholderTarget();
+	/**
+	 *  Soft targeting, until the Targeting component and hard lock exist: of the actors carrying the "Enemy" actor tag,
+	 *  targets the one with the lowest score, preferring to keep the current target.
+	 */
+	void UpdateSoftTarget();
+
+	/** Lower is better: distance as a fraction of TargetMaxDistance plus the weighted angle off ViewForward. Max float if out of range */
+	float ScoreTargetCandidate(const AActor* Candidate, const FVector& ViewForward) const;
 };

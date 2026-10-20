@@ -56,7 +56,7 @@ void ACombatCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	UpdatePlaceholderTarget();
+	UpdateSoftTarget();
 }
 
 void ACombatCharacter::PossessedBy(AController* NewController)
@@ -135,11 +135,58 @@ void ACombatCharacter::Attack()
 	CombatResolver->HandleAttackPressed();
 }
 
-void ACombatCharacter::UpdatePlaceholderTarget()
+void ACombatCharacter::UpdateSoftTarget()
 {
 	TArray<AActor*> Enemies;
 	UGameplayStatics::GetAllActorsWithTag(this, TEXT("Enemy"), Enemies);
 
-	float NearestDistance = 0.0f;
-	CombatContext->SetTarget(UGameplayStatics::FindNearestActor(GetActorLocation(), Enemies, NearestDistance));
+	// where the camera looks, flattened: an enemy above or below the view line isn't "off to the side"
+	const FRotator ViewRotation = Controller ? Controller->GetControlRotation() : GetActorRotation();
+	const FVector ViewForward = FRotator(0.0, ViewRotation.Yaw, 0.0).Vector();
+
+	const float Unreachable = TNumericLimits<float>::Max();
+	AActor* CurrentTarget = CombatContext->GetTarget();
+	float CurrentScore = Unreachable;
+	AActor* BestTarget = nullptr;
+	float BestScore = Unreachable;
+
+	for (AActor* Enemy : Enemies)
+	{
+		const float Score = ScoreTargetCandidate(Enemy, ViewForward);
+		if (Enemy == CurrentTarget)
+		{
+			CurrentScore = Score;
+		}
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			BestTarget = Enemy;
+		}
+	}
+
+	// keep the current target unless the best one is clearly better; a destroyed or out-of-range target scores Unreachable and always loses
+	if (CurrentScore < Unreachable && BestScore > CurrentScore - TargetSwitchMargin)
+	{
+		BestTarget = CurrentTarget;
+	}
+
+	CombatContext->SetTarget(BestTarget);
+}
+
+float ACombatCharacter::ScoreTargetCandidate(const AActor* Candidate, const FVector& ViewForward) const
+{
+	// horizontal, like the context component's range bands
+	const FVector ToCandidate = Candidate->GetActorLocation() - GetActorLocation();
+	const float Distance = ToCandidate.Size2D();
+	if (Distance > TargetMaxDistance)
+	{
+		return TNumericLimits<float>::Max();
+	}
+
+	// 0 straight ahead, 0.5 square to the side, 1 directly behind; an enemy on top of the player counts as ahead
+	const float AngleCost = Distance > KINDA_SMALL_NUMBER
+		? (1.0f - FVector::DotProduct(ToCandidate.GetSafeNormal2D(), ViewForward)) * 0.5f
+		: 0.0f;
+
+	return Distance / TargetMaxDistance + TargetAngleWeight * AngleCost;
 }
