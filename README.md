@@ -42,6 +42,41 @@ This makes fallbacks a matter of row order, with no special cases in code:
 - Fall-through only skips rows. It never relaxes a requirement, so an empty Ground Far Crowd slot falls to Ground Far, never to Ground Close.
 - The same applies to the situational slots: with nothing in the Riser slot, a launched target falls through to the grid cell instead of the basic attack.
 
+## Setting up an attack montage
+
+Checklist for turning an animation into an attack. Several of these fail silently, so go through all of them.
+
+### The animation
+
+1. Retarget it onto the mannequin (`SKM_Manny_Simple`) and save it in `Content/Combat/Animations` with a `Manny_` prefix, never inside a pack folder.
+2. **Root motion:** on the sequence (not the montage), in Asset Details > Root Motion:
+   - Attacks that move with a **Combat Lunge** window: **Enable Root Motion off**. The lunge moves the character; root motion left on fights it.
+   - Attacks that should move the character the way the animation does, with no lunge: Enable Root Motion on.
+3. Retargeted animations can carry the original pack's notifies (sounds, particles). Delete any you didn't add from the Notifies track.
+
+### The montage
+
+1. Right-click the sequence > Create > Create AnimMontage, saved next to it with a `_Montage` suffix.
+2. **Blend Options > Blend Out Trigger Time = 0.** The default (-1) stops the montage a blend-out time (0.25 s) before it ends so the fade finishes on the last frame. From that point the code sees no montage playing: the input buffer opens early, and in a combo the chain restarts the first hit instead of moving on. With 0 the montage stays active to its last frame and fades afterwards.
+3. Put notifies on the **montage's** Notifies track, not the sequence's. The code only accepts windows on the montage of the ability it's playing.
+4. Set the ability asset's **Montage** to it.
+
+### Lunge (closing the gap in code)
+
+- Add a **Combat Lunge** notify state over the frames where the attack steps in. The window's length is the dash's duration.
+- On the ability asset, set **Lunge Reach** (how far it can travel, 0 = no lunge) and **Lunge Stop Distance** (how far short of the target it stops). A target beyond Reach + Stop Distance is a miss.
+
+### Combos (one montage, one section per hit)
+
+1. Build one montage holding every hit in order: create it from the first hit, then drag the other sequences onto the slot track after it.
+2. Add a **section** at the first frame of each hit (right-click the Sections track > New Montage Section). Names don't matter; the code goes by timeline order.
+3. In the **Montage Sections** panel press **Clear**, so each section stops on its own. Linked sections (A→B→C→D, the default) play the whole combo from one press.
+4. Add a **Combo Window** notify state to every hit except the last; the last hit having none is what ends the combo.
+   - Window **start** = the earliest a press is kept for the next hit.
+   - Window **end** = when a kept press chains. A press after the end, during the recovery, chains straight away.
+   - Keep the window inside its own section.
+5. A press that resolves to a different ability (e.g. the target is now Far) cancels into that ability instead of the next hit. A pause past the end of a hit drops the combo, and the next press starts from the first hit.
+
 ## Third-party content
 
 Some assets come from Fab and are not stored in Git; a fresh clone needs them re-added before the project opens cleanly.

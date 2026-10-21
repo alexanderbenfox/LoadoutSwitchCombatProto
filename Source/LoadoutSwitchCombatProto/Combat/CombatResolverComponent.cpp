@@ -1,4 +1,5 @@
 #include "Combat/CombatResolverComponent.h"
+#include "Animation/AnimMontage.h"
 #include "Combat/CombatContextComponent.h"
 #include "Combat/CombatResolverRules.h"
 #include "DrawDebugHelpers.h"
@@ -9,6 +10,7 @@
 #include "Loadout/CombatAbilityDefinition.h"
 #include "Loadout/CombatLoadout.h"
 #include "Loadout/CombatLoadoutComponent.h"
+#include "LoadoutSwitchCombatProto.h"
 
 UCombatResolverComponent::UCombatResolverComponent()
 {
@@ -66,7 +68,8 @@ FCombatResolution UCombatResolverComponent::Resolve() const
 void UCombatResolverComponent::HandleAttackPressed()
 {
 	float AbilityTimeRemaining = GetCurrentAbilityTimeRemaining();
-	if (AbilityTimeRemaining >= BufferTime)
+	const bool bComboPending = bComboWindowOpen || bCanChain;
+	if (AbilityTimeRemaining >= BufferTime && !bComboPending )
 	{
 		return;
 	}
@@ -78,17 +81,21 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// a prediction for display only; the press resolves again for itself
+	// Get the resolution state for the tick - drives queued ability press
 	const FCombatResolution Resolution = Resolve();
 	const FGameplayTag Slot = Resolution.Slot;
 	const UCombatAbilityDefinition* Ability = Resolution.Ability;
 
 	float AbilityTimeRemaining = GetCurrentAbilityTimeRemaining();
-	if (AbilityTimeRemaining <= 0.f && bAbilityQueued )
+	if (( bCanChain || AbilityTimeRemaining <= 0.f ) && bAbilityQueued )
 	{
-		bAbilityActive = PlayAbilityMontage( Ability);
+		FName ChainName = GetChainSection(Ability);
+		bAbilityActive = PlayAbilityMontage(Ability, ChainName);
 		ActiveAbility = bAbilityActive ? Ability : nullptr;
+		
 		bAbilityQueued = false;
+		bComboWindowOpen = false;
+		bCanChain = false;
 
 		// say which ability the press resolved to, so it still reads before every ability has a montage
 		if (bShowDebug && GEngine)
@@ -102,6 +109,12 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	else if (AbilityTimeRemaining <= 0.f)
 	{
 		bAbilityActive = false;
+	}
+
+	if (!bAbilityActive)
+	{
+		bComboWindowOpen = false;
+		bCanChain = false;
 	}
 
 	if (!bShowDebug && !bShowReticle)
@@ -126,7 +139,37 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 }
 
-bool UCombatResolverComponent::PlayAbilityMontage(const UCombatAbilityDefinition* Ability) const
+bool UCombatResolverComponent::CanJumpNow() const
+{
+	return !bAbilityActive || (ActiveAbility && ActiveAbility->bJumpCancelable);
+}
+
+void UCombatResolverComponent::CancelAttack()
+{
+	if (!bAbilityActive)
+	{
+		return;
+	}
+
+	if (ACharacter* Char = Cast<ACharacter>(GetOwner()))
+	{
+		if (ActiveAbility && ActiveAbility->Montage)
+		{
+			Char->StopAnimMontage(ActiveAbility->Montage);
+		}
+
+		// the name StartLunge gives its root motion source
+		Char->GetCharacterMovement()->RemoveRootMotionSource(TEXT("CombatLunge"));
+	}
+
+	bAbilityActive = false;
+	bAbilityQueued = false;
+	bComboWindowOpen = false;
+	bCanChain = false;
+	ActiveAbility = nullptr;
+}
+
+bool UCombatResolverComponent::PlayAbilityMontage(const UCombatAbilityDefinition* Ability, FName StartSection) const
 {
 	if (!Ability || !Ability->Montage)
 	{
@@ -139,7 +182,74 @@ bool UCombatResolverComponent::PlayAbilityMontage(const UCombatAbilityDefinition
 		return false;
 	}
 
-	return (Char->PlayAnimMontage(Ability->Montage) > 0.f);
+	return (Char->PlayAnimMontage(Ability->Montage, 1.0f, StartSection) > 0.f);
+}
+
+FName UCombatResolverComponent::GetChainSection(const UCombatAbilityDefinition* Next) const
+{
+	if (!Next)
+	{
+		return NAME_None;
+	}
+
+	// only allow if we are continuing current ability
+	if (!bAbilityActive || Next != ActiveAbility || !Next->Montage)
+	{
+		return NAME_None;
+	}
+
+	ACharacter* Char = Cast<ACharacter>(GetOwner());
+	if (!Char )
+	{
+		return NAME_None;
+	}
+
+	UAnimMontage* Montage = ActiveAbility->Montage;
+	UAnimInstance* CurrAnim = Char->GetMesh()->GetAnimInstance();
+	if (!CurrAnim)
+	{
+		return NAME_None;
+	}
+
+	FName CurrSelectionName = CurrAnim->Montage_GetCurrentSection(Montage);
+
+	int32 iAnimIndex = Montage->GetSectionIndex(CurrSelectionName);
+
+	if ( ( iAnimIndex != INDEX_NONE ) && ( iAnimIndex + 1 ) < Montage->CompositeSections.Num())
+	{
+		return Montage->GetSectionName(iAnimIndex + 1);
+	}
+	else
+	{
+		return NAME_None;
+	}
+}
+
+bool UCombatResolverComponent::IsActiveAbilityMontage(const UAnimSequenceBase* Animation) const
+{
+	return bAbilityActive && ActiveAbility && Animation && Animation == ActiveAbility->Montage.Get();
+}
+
+void UCombatResolverComponent::HandleComboWindowBegin(const UAnimSequenceBase* Animation)
+{
+	if (!IsActiveAbilityMontage(Animation))
+	{
+		return;
+	}
+
+	bComboWindowOpen = true;
+}
+
+void UCombatResolverComponent::HandleComboWindowEnd(const UAnimSequenceBase* Animation)
+{
+	// a window also ends when its montage is interrupted; only a window we saw open counts
+	if (!bComboWindowOpen || !IsActiveAbilityMontage(Animation))
+	{
+		return;
+	}
+
+	bComboWindowOpen = false;
+	bCanChain = true;
 }
 
 void UCombatResolverComponent::HandleLungeWindowBegin(float Duration)
@@ -270,6 +380,13 @@ float UCombatResolverComponent::GetCurrentAbilityTimeRemaining() const
 		return 0.f;
 	}
 
+	FName CurrSelectionName = Anim->Montage_GetCurrentSection(Current);
+	int32 iAnimIndex = Current->GetSectionIndex(CurrSelectionName);
+
+	float fStartTime;
+	float fEndTime;
+	Current->GetSectionStartAndEndTime(iAnimIndex, fStartTime, fEndTime);
+
 	const float Rate = Anim->Montage_GetPlayRate(Current) * Current->RateScale;
-	return Rate > 0.f ? (Current->GetPlayLength() - Anim->Montage_GetPosition(Current)) / Rate : 0.f;
+	return Rate > 0.f ? ( fEndTime - Anim->Montage_GetPosition(Current)) / Rate : 0.f;
 }

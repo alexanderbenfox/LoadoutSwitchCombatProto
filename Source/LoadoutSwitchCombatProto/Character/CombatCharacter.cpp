@@ -103,6 +103,18 @@ void ACombatCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 }
 
+bool ACombatCharacter::CanJumpInternal_Implementation() const
+{
+	return Super::CanJumpInternal_Implementation() && CombatResolver->CanJumpNow();
+}
+
+void ACombatCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+
+	CombatResolver->CancelAttack();
+}
+
 void ACombatCharacter::Move(const FInputActionValue& Value)
 {
 	const FVector2D MovementVector = Value.Get<FVector2D>();

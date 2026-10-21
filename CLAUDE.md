@@ -19,7 +19,8 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 - Resolver: buffered input -> context -> priority order -> slot lookup -> activate GAS ability.
 - Data assets: Loadout, Ability Definition (ability class, montage, AP cost, allowed weapon classes, warp settings, damage, stagger).
 - Base context-attack Gameplay Ability: plays montage, sets motion-warp target, applies damage via Gameplay Effect.
-- Animation notify windows: hit, combo, dodge-cancel, swap-cancel, motion warp.
+- Animation notify windows: hit, combo, dodge-cancel, swap-cancel, motion warp. Built so far: Combat Lunge, Combo Window. Asset setup rules (Blend Out Trigger Time 0, unlinked sections, notifies on the montage, root motion off for lunging attacks) are in README "Setting up an attack montage"; follow them when adding attacks.
+- Jumping is blocked while an attack plays (`ACombatCharacter::CanJumpInternal_Implementation`), unless the ability has `bJumpCancelable`; then the jump goes ahead and `UCombatResolverComponent::CancelAttack` stops the montage and lunge. Whole-attack flag for now; if a cancel should only be allowed on certain frames, replace it with a Jump Cancel notify window.
 - Animation-driven directives: frame-specific gameplay (spawn projectile, magnetize) is placed as Anim Notifies on the montage. Motion warping uses the built-in Motion Warping notify state. Custom notifies send a Gameplay Event (`Event.*` tag) to the owner's ASC; the active ability listens with WaitGameplayEvent, so notifies stay dumb and the logic lives in the ability. Example: the throw ability spawns its projectile on `Event.Throw.Release` and grants a `State.WeaponThrown` tag that attack abilities list as Activation Blocked; the returning projectile removes the tag and triggers a catch montage.
 
 ## Planned follow-ups

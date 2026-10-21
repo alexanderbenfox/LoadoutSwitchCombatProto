@@ -41,6 +41,10 @@ public:
 
 	// when the lunge happens and how long it takes come from a Combat Lunge notify window on the montage
 
+	/** A jump press cancels this attack at any point. Off, jumping is blocked until the attack ends */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Cancels")
+	bool bJumpCancelable = false;
+
 	/** Colour of the on-screen message when this ability is used, so each one reads differently before there are animations */
 	UPROPERTY(EditAnywhere, Category = "Ability|Debug")
 	FColor DebugColor = FColor::White;

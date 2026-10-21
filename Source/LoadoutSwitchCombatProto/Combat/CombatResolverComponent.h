@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "CombatResolverComponent.generated.h"
 
+class UAnimSequenceBase;
 class UCombatAbilityDefinition;
 class UCombatContextComponent;
 class UCombatLoadoutComponent;
@@ -48,8 +49,23 @@ public:
 	/** Called by the character when the attack button goes down */
 	void HandleAttackPressed();
 
+	/** True while an attack montage this resolver started is playing, recovery included */
+	bool IsAttacking() const { return bAbilityActive; }
+
+	/** True unless an attack is playing whose ability isn't Jump Cancelable */
+	bool CanJumpNow() const;
+
+	/** Stops the attack in progress, if any: its montage, its lunge and any kept press. Used by cancels such as jumping */
+	void CancelAttack();
+
 	/** Called by a Combat Lunge notify window on the playing montage; lunges for the ability that montage belongs to */
 	void HandleLungeWindowBegin(float Duration);
+
+	/** Called by a Combo Window notify on Animation. Presses from here on are kept for the next attack */
+	void HandleComboWindowBegin(const UAnimSequenceBase* Animation);
+
+	/** Called when that window closes. From here until the attack ends, a kept or new press chains into the next attack */
+	void HandleComboWindowEnd(const UAnimSequenceBase* Animation);
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -82,9 +98,18 @@ private:
 	/**
 	 *  Plays the ability's montage on the owning character. Stand-in for activating a GAS ability,
 	 *  which will take over montage playback once the base context-attack ability exists.
-	 *  Returns false if nothing was played
+	 *  Starts at StartSection, or the montage's beginning with NAME_None. Returns false if nothing was played
 	 */
-	bool PlayAbilityMontage(const UCombatAbilityDefinition* Ability) const;
+	bool PlayAbilityMontage(const UCombatAbilityDefinition* Ability, FName StartSection = NAME_None) const;
+
+	/**
+	 *  Which section of Next's montage a chained attack starts at: the section after the one playing now
+	 *  if Next is the ability already playing, else NAME_None (from the start, e.g. a cancel into a different move).
+	 */
+	FName GetChainSection(const UCombatAbilityDefinition* Next) const;
+
+	/** True if Animation is the montage of the ability we're playing; filters out windows on montages we didn't start, or stale ones */
+	bool IsActiveAbilityMontage(const UAnimSequenceBase* Animation) const;
 
 	/**
 	 *  Turns the owner to face the context target and moves it towards the target with a root motion source,
@@ -109,6 +134,12 @@ private:
 
 	bool bAbilityQueued = false;
 	bool bAbilityActive = false;
+
+	/** True from a Combo Window opening until it closes: presses are kept for the next attack */
+	bool bComboWindowOpen = false;
+
+	/** True from a Combo Window closing until the attack ends or the next one starts: the attack can be cancelled into the next */
+	bool bCanChain = false;
 
 	/** The ability whose montage was last played, so notifies on that montage know which ability they belong to */
 	UPROPERTY(Transient)

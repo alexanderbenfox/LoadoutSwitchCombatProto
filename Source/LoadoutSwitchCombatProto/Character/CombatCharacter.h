@@ -104,6 +104,12 @@ protected:
 	virtual void NotifyControllerChanged() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
+	/** No jumping out of an attack unless its ability is Jump Cancelable. A blocked jump press is dropped, not saved for when the attack ends */
+	virtual bool CanJumpInternal_Implementation() const override;
+
+	/** A jump that went ahead during a Jump Cancelable attack cancels the attack */
+	virtual void OnJumped_Implementation() override;
+
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 	void Attack();
