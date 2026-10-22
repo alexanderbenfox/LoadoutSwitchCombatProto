@@ -9,5 +9,6 @@ public class LoadoutSwitchCombatProtoEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.Add("LoadoutSwitchCombatProto");
+		ExtraModuleNames.Add("LoadoutSwitchCombatProtoEditor");
 	}
 }

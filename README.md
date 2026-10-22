@@ -66,6 +66,22 @@ Checklist for turning an animation into an attack. Several of these fail silentl
 - Add a **Combat Lunge** notify state over the frames where the attack steps in. The window's length is the dash's duration.
 - On the ability asset, set **Lunge Reach** (how far it can travel, 0 = no lunge) and **Lunge Stop Distance** (how far short of the target it stops). A target beyond Reach + Stop Distance is a miss.
 
+### Hits
+
+- Add a **Hit Window** notify state over the frames where the weapon should connect. While it's open, the weapon's hit segment is swept from where it was last frame to where it is now, so a fast swing can't skip past an enemy.
+- Each enemy is hit at most once per window. A multi-hit attack gets one window per hit; windows mustn't overlap.
+- **Weapons** on the window lists which Combat Weapon components it sweeps, by their name in the character's Components panel (e.g. `Weapon`). Leave it empty to sweep all of them. A misspelt name logs a warning when the window opens.
+- How thick the weapon is to hits is its own **Hit Radius** (on the Combat Weapon component, default 20 cm). **Hit Radius Scale** on the window (default 1) multiplies it; raise it to make one attack more forgiving than the weapon really is. Spheres are swept along the segment no more than one radius apart, so the count follows from Hit Length and radius; there's nothing to set.
+- On the ability asset, **Hit Launch Speed** above 0 launches the target upward (launchers, juggle hits); 0 leaves it where it is. **Hit Knockback Speed** above 0 pushes it away along the attacker's facing (flattened). Either, both or neither can be set; a launch with knockback sends it up and away.
+- The dummy reacts with **Flinch Montage** on the ground and **Air Flinch Montage** when launched or hit in the air (empty = none). The air flinch fades out on landing. While launched, the dummy's **Launched** flag is true until it lands; its anim blueprint can read it to use a tumble/launched state instead of the plain fall.
+- With the lunge's **Stop Distance**, check the swing actually reaches: if the weapon ends short of the target, every hit misses.
+
+### The weapon
+
+- The character's **Weapon** component is attached to `weapon_r_socket`, a socket on `hand_r` in the `SK_Mannequin` skeleton. Not on the `weapon_r` bone: that bone is in the skeleton but not in the Manny mesh, so a socket on it stays at the character's feet.
+- Position the weapon by editing the socket (Relative Location / Rotation / Scale), with the weapon mesh added to it as a preview asset.
+- The **Weapon** component (a Combat Weapon component) holds the weapon mesh and its hit segment. For a second hitbox (an off-hand dagger, a kick), add another Combat Weapon component in the Blueprint, attach it to its own socket, and name it in the windows that should use it. Select it to see the segment and its hit spheres drawn in the viewport. On it, **Weapon > Hit Segment > Hit Direction / Hit Start / Hit Length / Hit Radius** describe the part of the weapon that hits (a blade's edge, a hammer's head), in the weapon's own space: which way it runs from the mesh's pivot, where it starts and how long it is. The hit sweep uses these, not the mesh, so check them with the debug lines when swapping meshes.
+
 ### Combos (one montage, one section per hit)
 
 1. Build one montage holding every hit in order: create it from the first hit, then drag the other sequences onto the slot track after it.

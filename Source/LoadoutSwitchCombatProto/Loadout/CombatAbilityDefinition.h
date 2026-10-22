@@ -41,6 +41,19 @@ public:
 
 	// when the lunge happens and how long it takes come from a Combat Lunge notify window on the montage
 
+	/** Upward speed a hit gives the target, e.g. for a launcher; 0 means no upward launch */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Hit", meta = (ClampMin = 0, Units = "cm/s"))
+	float HitLaunchSpeed = 0.0f;
+
+	/**
+	 *  Horizontal speed a hit pushes the target with, along the attacker's facing; 0 means no push.
+	 *  On the ground, braking slows it like any slide; in the air (with Hit Launch Speed, or on a juggle) it carries until landing
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Hit", meta = (ClampMin = 0, Units = "cm/s"))
+	float HitKnockbackSpeed = 0.0f;
+
+	// when the weapon can hit comes from Hit Window notifies on the montage
+
 	/** A jump press cancels this attack at any point. Off, jumping is blocked until the attack ends */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Cancels")
 	bool bJumpCancelable = false;

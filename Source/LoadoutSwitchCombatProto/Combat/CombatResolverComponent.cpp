@@ -2,8 +2,11 @@
 #include "Animation/AnimMontage.h"
 #include "Combat/CombatContextComponent.h"
 #include "Combat/CombatResolverRules.h"
+#include "Combat/CombatWeaponComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Enemy/CombatDummy.h"
 #include "Engine/Engine.h"
+#include "Engine/HitResult.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/RootMotionSource.h"
@@ -23,6 +26,7 @@ void UCombatResolverComponent::BeginPlay()
 
 	ContextComponent = GetOwner()->FindComponentByClass<UCombatContextComponent>();
 	LoadoutComponent = GetOwner()->FindComponentByClass<UCombatLoadoutComponent>();
+	GetOwner()->GetComponents<UCombatWeaponComponent>(WeaponComponents);
 }
 
 FCombatResolution UCombatResolverComponent::Resolve() const
@@ -96,6 +100,8 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		bAbilityQueued = false;
 		bComboWindowOpen = false;
 		bCanChain = false;
+		bHitWindowOpen = false;
+		bAttackConnected = false;
 
 		// say which ability the press resolved to, so it still reads before every ability has a montage
 		if (bShowDebug && GEngine)
@@ -166,6 +172,7 @@ void UCombatResolverComponent::CancelAttack()
 	bAbilityQueued = false;
 	bComboWindowOpen = false;
 	bCanChain = false;
+	bHitWindowOpen = false;
 	ActiveAbility = nullptr;
 }
 
@@ -250,6 +257,146 @@ void UCombatResolverComponent::HandleComboWindowEnd(const UAnimSequenceBase* Ani
 
 	bComboWindowOpen = false;
 	bCanChain = true;
+}
+
+void UCombatResolverComponent::HandleHitWindowBegin(const UAnimSequenceBase* Animation, float RadiusScale, const TArray<FName>& WeaponNames)
+{
+	if (!IsActiveAbilityMontage(Animation))
+	{
+		return;
+	}
+
+	bHitWindowOpen = true;
+	HitRadiusScale = RadiusScale;
+	HitActors.Reset();
+
+	// the window's weapons: the ones it names, or all of them if it names none.
+	// each starts with no last frame to sweep from; its first tick only records where it is
+	ActiveSweeps.Reset();
+	for (UCombatWeaponComponent* Weapon : WeaponComponents)
+	{
+		if (Weapon && (WeaponNames.IsEmpty() || WeaponNames.Contains(Weapon->GetFName())))
+		{
+			FWeaponSweep& Sweep = ActiveSweeps.AddDefaulted_GetRef();
+			Sweep.Weapon = Weapon;
+		}
+	}
+
+	if (ActiveSweeps.IsEmpty())
+	{
+		UE_LOG(LogCombatProto, Warning, TEXT("Hit Window on '%s' matched no Combat Weapon components on '%s'; check its Weapons names"),
+			*GetNameSafe(Animation), *GetNameSafe(GetOwner()));
+	}
+}
+
+void UCombatResolverComponent::HandleHitWindowTick(const UAnimSequenceBase* Animation)
+{
+	if (!bHitWindowOpen || !IsActiveAbilityMontage(Animation))
+	{
+		return;
+	}
+
+	for (FWeaponSweep& Sweep : ActiveSweeps)
+	{
+		SweepWeapon(Sweep);
+	}
+}
+
+void UCombatResolverComponent::HandleHitWindowEnd(const UAnimSequenceBase* Animation)
+{
+	if (!IsActiveAbilityMontage(Animation))
+	{
+		return;
+	}
+
+	bHitWindowOpen = false;
+	HitActors.Reset();
+	ActiveSweeps.Reset();
+}
+
+void UCombatResolverComponent::SweepWeapon(FWeaponSweep& Sweep)
+{
+	const UCombatWeaponComponent* Weapon = Sweep.Weapon.Get();
+	if (!Weapon)
+	{
+		return;
+	}
+
+	FVector HitStart;
+	FVector HitEnd;
+	Weapon->GetHitSegment(HitStart, HitEnd);
+
+	// if has last hit segment, we can sweep from that to this frame's segment
+	if (Sweep.bHasLastHitSegment)
+	{
+		const float HitRadius = Weapon->GetHitRadius() * HitRadiusScale;
+		const int32 HitProbeNum = Weapon->GetHitProbeCount(HitRadius);
+		const FCollisionQueryParams Params(SCENE_QUERY_STAT(WeaponSweep), false, GetOwner());
+
+		// an object-type query reports every pawn along the sweep; a Pawn channel sweep would stop at the first capsule, missing enemies behind it
+		const FCollisionObjectQueryParams ObjectParams(ECC_Pawn);
+
+		for (int32 i = 0; i < HitProbeNum; i++)
+		{
+			FVector StartProbe = FMath::Lerp(Sweep.LastHitStart, Sweep.LastHitEnd, static_cast<float>(i) / (HitProbeNum - 1));
+			FVector EndProbe = FMath::Lerp(HitStart, HitEnd, static_cast<float>(i) / (HitProbeNum - 1));
+
+			TArray<FHitResult> HitResults;
+			GetWorld()->SweepMultiByObjectType(HitResults, StartProbe, EndProbe, FQuat::Identity, ObjectParams, FCollisionShape::MakeSphere(HitRadius), Params);
+
+			for (const FHitResult& Hit : HitResults)
+			{
+				if (!Hit.GetActor())
+				{
+					continue;
+				}
+
+				ApplyHit(Hit.GetActor(), Hit);
+			}
+
+			// draw hit sphere
+			if (bShowDebug)
+			{
+				DrawDebugSphere(GetWorld(), EndProbe, HitRadius, 20, FColor::Red);
+			}
+		}
+	}
+
+	// the hit segment itself, so a wrong HitDirection / HitStart / HitLength is obvious
+	if (bShowDebug)
+	{
+		DrawDebugLine(GetWorld(), HitStart, HitEnd, FColor::Yellow);
+	}
+
+	Sweep.bHasLastHitSegment = true;
+	Sweep.LastHitStart = HitStart;
+	Sweep.LastHitEnd = HitEnd;
+}
+
+void UCombatResolverComponent::ApplyHit(AActor* Victim, const FHitResult& Hit)
+{
+	if (!Victim || HitActors.Contains(Victim))
+	{
+		return;
+	}
+
+	// stand-in for applying a Gameplay Effect to the victim's ability system
+	ACombatDummy* Dummy = Cast<ACombatDummy>(Victim);
+	if (!Dummy)
+	{
+		return;
+	}
+
+	HitActors.Add(Victim);
+	bAttackConnected = true;
+
+	Dummy->ReceiveHit(GetOwner(), ActiveAbility, Hit);
+
+	if (bShowDebug && GEngine)
+	{
+		const FString Text = FString::Printf(TEXT("HIT: %s"), *GetNameSafe(Victim));
+		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, Text);
+	}
 }
 
 void UCombatResolverComponent::HandleLungeWindowBegin(float Duration)

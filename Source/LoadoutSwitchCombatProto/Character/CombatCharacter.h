@@ -14,6 +14,7 @@ class UInputAction;
 class UInputMappingContext;
 class UMotionWarpingComponent;
 class USpringArmComponent;
+class UCombatWeaponComponent;
 struct FInputActionValue;
 
 /**
@@ -52,6 +53,13 @@ class ACombatCharacter : public ACharacter, public IAbilitySystemInterface
 	/** Picks a slot from the context using the priority rules */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCombatResolverComponent> CombatResolver;
+
+	/**
+	 *  The weapon in the character's hand; its hit segment is set on the component.
+	 *  Attached to weapon_r_socket (on hand_r); change Parent Socket on the component in the Blueprint if the socket is renamed.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCombatWeaponComponent> Weapon;
 
 protected:
 

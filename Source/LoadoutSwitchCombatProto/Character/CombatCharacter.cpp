@@ -3,6 +3,7 @@
 #include "Camera/CameraComponent.h"
 #include "Combat/CombatContextComponent.h"
 #include "Combat/CombatResolverComponent.h"
+#include "Combat/CombatWeaponComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/LocalPlayer.h"
 #include "EnhancedInputComponent.h"
@@ -50,6 +51,9 @@ ACombatCharacter::ACombatCharacter()
 	CombatContext = CreateDefaultSubobject<UCombatContextComponent>(TEXT("CombatContext"));
 	CombatLoadout = CreateDefaultSubobject<UCombatLoadoutComponent>(TEXT("CombatLoadout"));
 	CombatResolver = CreateDefaultSubobject<UCombatResolverComponent>(TEXT("CombatResolver"));
+
+	Weapon = CreateDefaultSubobject<UCombatWeaponComponent>(TEXT("Weapon"));
+	Weapon->SetupAttachment(GetMesh(), TEXT("weapon_r_socket"));
 }
 
 void ACombatCharacter::Tick(float DeltaSeconds)

@@ -19,7 +19,7 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 - Resolver: buffered input -> context -> priority order -> slot lookup -> activate GAS ability.
 - Data assets: Loadout, Ability Definition (ability class, montage, AP cost, allowed weapon classes, warp settings, damage, stagger).
 - Base context-attack Gameplay Ability: plays montage, sets motion-warp target, applies damage via Gameplay Effect.
-- Animation notify windows: hit, combo, dodge-cancel, swap-cancel, motion warp. Built so far: Combat Lunge, Combo Window. Asset setup rules (Blend Out Trigger Time 0, unlinked sections, notifies on the montage, root motion off for lunging attacks) are in README "Setting up an attack montage"; follow them when adding attacks.
+- Animation notify windows: hit, combo, dodge-cancel, swap-cancel, motion warp. Built so far: Combat Lunge, Combo Window, Hit Window (sweeps the weapon's hit segment, `UCombatWeaponComponent::GetHitSegment`, each frame; hits go to `ACombatDummy::ReceiveHit` as a stand-in for a Gameplay Effect; `UCombatResolverComponent::HasAttackConnected` is for swap cancel and the combo counter). Asset setup rules (Blend Out Trigger Time 0, unlinked sections, notifies on the montage, root motion off for lunging attacks) are in README "Setting up an attack montage"; follow them when adding attacks.
 - Jumping is blocked while an attack plays (`ACombatCharacter::CanJumpInternal_Implementation`), unless the ability has `bJumpCancelable`; then the jump goes ahead and `UCombatResolverComponent::CancelAttack` stops the montage and lunge. Whole-attack flag for now; if a cancel should only be allowed on certain frames, replace it with a Jump Cancel notify window.
 - Animation-driven directives: frame-specific gameplay (spawn projectile, magnetize) is placed as Anim Notifies on the montage. Motion warping uses the built-in Motion Warping notify state. Custom notifies send a Gameplay Event (`Event.*` tag) to the owner's ASC; the active ability listens with WaitGameplayEvent, so notifies stay dumb and the logic lives in the ability. Example: the throw ability spawns its projectile on `Event.Throw.Release` and grants a `State.WeaponThrown` tag that attack abilities list as Activation Blocked; the returning projectile removes the tag and triggers a catch montage.
 
@@ -28,6 +28,7 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 - Target-airborne detection, later: once enemies have an Ability System component, the enemy owns its combat state as tags and the context component reads those instead of movement state. Working names: `State.Floating` (launched, juggled or flying; a valid Riser / air-juggle target) and `State.Vulnerable` (staggered). The two can be held together, e.g. launched and staggered. The player's own stance stays on `IsFalling`.
 
 - Soft targeting: `ACombatCharacter::UpdateSoftTarget` scores enemies by distance plus angle off the camera's forward, with a switch margin against flicker. Move it into the Targeting component when hard lock is built (hard lock overrides it). Possible addition: bias by movement-stick direction while the stick is held.
+- Hit reactions (`HitLaunchSpeed`, `HitKnockbackSpeed`) are applied in `ACombatDummy::ReceiveHit` for now; a Gameplay Effect / hit-react ability later. Knockback runs along the attacker's flattened facing, not the hit's `ImpactNormal` (unreliable when the sweep starts inside the capsule).
 - Lock-on indicator shows what the press will do: the lock-on symbol itself changes to show whether the resolved attack is a Close move, a Far move, or will miss (target out of the resolved move's reach). Replaces the debug reticle; reads from the same `Resolve()` prediction so indicator and press never disagree.
 
 ## Milestones
@@ -36,6 +37,7 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 
 ## Conventions
 - Prototype animations: Paragon (Greystone/Kallari/Sparrow), Game Animation Sample, Mixamo; retarget to UE5 mannequin.
+- Editor-only tooling (component visualizers etc.) goes in the `LoadoutSwitchCombatProtoEditor` module (Type Editor, PostEngineInit), registered in its `StartupModule`. A game class it uses needs `LOADOUTSWITCHCOMBATPROTO_API` on its declaration.
 - Git + LFS. Never commit Binaries/, Intermediate/, Saved/, DerivedDataCache/.
 - Build: Development Editor | Win64. Engine is at `D:\UE_5.8`; from a shell:
   `& "D:\UE_5.8\Engine\Build\BatchFiles\Build.bat" LoadoutSwitchCombatProtoEditor Win64 Development -project="<repo>\LoadoutSwitchCombatProto.uproject" -waitmutex`

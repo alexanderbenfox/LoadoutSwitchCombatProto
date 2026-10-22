@@ -10,6 +10,7 @@ class UCombatAbilityDefinition;
 class UCombatContextComponent;
 class UCombatLoadoutComponent;
 class UCombatResolverRules;
+class UCombatWeaponComponent;
 
 /** What one attack press resolves to: the slot that won and the ability in it, taken from a single context snapshot */
 USTRUCT(BlueprintType)
@@ -23,6 +24,17 @@ struct FCombatResolution
 	/** Null when there is no loadout to resolve against */
 	UPROPERTY(BlueprintReadOnly, Category = "Resolution")
 	TObjectPtr<UCombatAbilityDefinition> Ability;
+};
+
+/** One weapon an open Hit Window is sweeping, and where its hit segment was at the end of last frame's sweep, in world space **/
+struct FWeaponSweep
+{
+	TWeakObjectPtr<UCombatWeaponComponent> Weapon;
+
+	/** False until the window's first tick has recorded a segment to sweep from */
+	bool bHasLastHitSegment = false;
+	FVector LastHitStart = FVector::ZeroVector;
+	FVector LastHitEnd = FVector::ZeroVector;
 };
 
 /**
@@ -66,6 +78,21 @@ public:
 
 	/** Called when that window closes. From here until the attack ends, a kept or new press chains into the next attack */
 	void HandleComboWindowEnd(const UAnimSequenceBase* Animation);
+
+	/**
+	 *  Called by a Hit Window notify on Animation when it opens: forgets who the last window hit, and picks the weapons to sweep,
+	 *  the Combat Weapon components named in WeaponNames, or all of them if it's empty. RadiusScale multiplies each weapon's Hit Radius
+	 */
+	void HandleHitWindowBegin(const UAnimSequenceBase* Animation, float RadiusScale, const TArray<FName>& WeaponNames);
+
+	/** Called every frame the window is open: sweeps each of its weapons from last frame's position to this frame's */
+	void HandleHitWindowTick(const UAnimSequenceBase* Animation);
+
+	/** Called when that window closes */
+	void HandleHitWindowEnd(const UAnimSequenceBase* Animation);
+
+	/** True once the current attack has hit something. Swap cancel and the combo counter will read this */
+	bool HasAttackConnected() const { return bAttackConnected; }
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -118,6 +145,15 @@ private:
 	 */
 	void StartLunge(const UCombatAbilityDefinition* Ability, float Duration) const;
 
+	/**
+	 *  Sweeps Sweep's weapon hit segment from Sweep.LastHitStart/LastHitEnd to where it is now, with the weapon's Hit Radius times HitRadiusScale,
+	 *  calls ApplyHit on each enemy it touches, then stores this frame's segment in Sweep as the last one.
+	 */
+	void SweepWeapon(FWeaponSweep& Sweep);
+
+	/** Hits Victim with the active ability, unless this window already hit it */
+	void ApplyHit(AActor* Victim, const FHitResult& Hit);
+
 	/** Draws the reticle on Target for the predicted ability; Ability can be null */
 	void DrawReticle(const AActor* Target, const UCombatAbilityDefinition* Ability) const;
 
@@ -132,6 +168,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UCombatLoadoutComponent> LoadoutComponent;
 
+	/** Every Combat Weapon component on the owner, found at BeginPlay; Hit Windows sweep these */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UCombatWeaponComponent>> WeaponComponents;
+
 	bool bAbilityQueued = false;
 	bool bAbilityActive = false;
 
@@ -144,5 +184,21 @@ private:
 	/** The ability whose montage was last played, so notifies on that montage know which ability they belong to */
 	UPROPERTY(Transient)
 	TObjectPtr<const UCombatAbilityDefinition> ActiveAbility;
+
+	/** True while a Hit Window on the active ability's montage is open */
+	bool bHitWindowOpen = false;
+
+	/** The open Hit Window's multiplier on each weapon's Hit Radius */
+	float HitRadiusScale = 1.0f;
+
+	/** The weapons the open Hit Window is sweeping */
+	TArray<FWeaponSweep> ActiveSweeps;
+
+	/** Who the open Hit Window has already hit, with any of its weapons, so each enemy takes one hit per window */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AActor>> HitActors;
+
+	/** True once the current attack has hit something; reset when the next attack starts */
+	bool bAttackConnected = false;
 
 };
