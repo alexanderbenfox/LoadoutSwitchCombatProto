@@ -41,6 +41,7 @@ This makes fallbacks a matter of row order, with no special cases in code:
 - A general row must not require `Context.Target.Single`; otherwise it can't catch a crowd whose Crowd slot is empty.
 - Fall-through only skips rows. It never relaxes a requirement, so an empty Ground Far Crowd slot falls to Ground Far, never to Ground Close.
 - The same applies to the situational slots: with nothing in the Riser slot, a launched target falls through to the grid cell instead of the basic attack.
+- A target only counts as airborne (`Context.Target.Airborne`, the Riser) when it's falling and at least **Target Airborne Min Height** (120 cm, on the Combat Context component) off the ground, measured down from the bottom of its capsule. A hit that pops it up a little, or the end of its fall, still reads as grounded and gets the ground attacks. The context debug line shows the target's height next to the threshold.
 
 ## Setting up an attack montage
 
@@ -65,6 +66,16 @@ Checklist for turning an animation into an attack. Several of these fail silentl
 
 - Add a **Combat Lunge** notify state over the frames where the attack steps in. The window's length is the dash's duration.
 - On the ability asset, set **Lunge Reach** (how far it can travel, 0 = no lunge) and **Lunge Stop Distance** (how far short of the target it stops). A target beyond Reach + Stop Distance is a miss.
+- **Lunge Step Without Target** (0 = none): with no target, the lunge steps this far straight ahead instead, so a combo swung at nothing still moves forward.
+- Forward momentum in a ground combo comes from pairing the two: each hit's Knockback pushes the target back a little, and the next hit's lunge follows it in.
+
+### Rise (going up with the attack)
+
+- Add a **Combat Rise** notify state over the frames where the attack carries the character up, e.g. a riser jumping with the enemy it launches. The window's length is how long the climb takes; the window's end is the top, where the character starts to fall.
+- The climb eases out like a jump: fast off the ground, slowing to a stop at the top, so gravity takes over without a jolt. A shorter window gives a snappier jump. For a different shape, set **Rise Curve** on the ability (a Float Curve asset, X = time through the window and Y = progress, both 0 to 1; end on a flat slope).
+- On the ability asset, set **Rise Height** (0 = no rise). **Rise Reach** lets the rise also drift across towards the target (0 = straight up), stopping **Lunge Stop Distance** short of it, so the character stays in front of what it launched. The rise also turns the character to face the target.
+- To meet a launched target at its peak: launched at speed v, it tops out at v² / 1960 cm after v / 980 s at default gravity (1000 cm/s: ~510 cm after ~1 s).
+- Don't overlap it with a Combat Lunge window; only one of them can move the character at a time. Put the lunge first if the attack does both.
 
 ### Hits
 
@@ -72,7 +83,13 @@ Checklist for turning an animation into an attack. Several of these fail silentl
 - Each enemy is hit at most once per window. A multi-hit attack gets one window per hit; windows mustn't overlap.
 - **Weapons** on the window lists which Combat Weapon components it sweeps, by their name in the character's Components panel (e.g. `Weapon`). Leave it empty to sweep all of them. A misspelt name logs a warning when the window opens.
 - How thick the weapon is to hits is its own **Hit Radius** (on the Combat Weapon component, default 20 cm). **Hit Radius Scale** on the window (default 1) multiplies it; raise it to make one attack more forgiving than the weapon really is. Spheres are swept along the segment no more than one radius apart, so the count follows from Hit Length and radius; there's nothing to set.
-- On the ability asset, **Hit Launch Speed** above 0 launches the target upward (launchers, juggle hits); 0 leaves it where it is. **Hit Knockback Speed** above 0 pushes it away along the attacker's facing (flattened). Either, both or neither can be set; a launch with knockback sends it up and away.
+- What a hit does is set on the ability asset, under **Hit**:
+  - **Damage**.
+  - **Hit Stun** (seconds; at 60 fps, 0.1 s is 6 frames): how long the target can't act. Each hit restarts it.
+  - **Launch Speed** above 0 launches the target upward (launchers, juggle re-pops); below 0 slams it down (an air combo finisher). At 0, a hit on a target in the air holds it up for the hit stun instead: its fall stops and its gravity drops to the dummy's **Air Hit Gravity Scale** (0.15), so an air combo juggles it. A target launched upward floats at its peak the same way, for whatever is left of the launching hit's stun; give a launcher a long Hit Stun to leave time to follow it up.
+  - **Knockback Speed** above 0 pushes it away along the attacker's facing (flattened). Either, both or neither can be set; both sends it up and away.
+  - **Hit Stop** (seconds, default 0, off): the attacker and the target freeze for this long when the hit lands; the launch or knockback plays out after it. Off by default to keep combos fluid, Kingdom Hearts style; a single hit can still opt in (around 0.05–0.1). How frozen is the resolver's **Hit Stop Time Dilation** (0.02; 1 turns hit-stop off).
+- These are the defaults for all the ability's hits. Each Hit Window can override any of them for its own hit: tick the value's checkbox on the window. Typical uses: a combo finisher with bigger knockback, or the last hit of an air combo with no launch.
 - The dummy reacts with **Flinch Montage** on the ground and **Air Flinch Montage** when launched or hit in the air (empty = none). The air flinch fades out on landing. While launched, the dummy's **Launched** flag is true until it lands; its anim blueprint can read it to use a tumble/launched state instead of the plain fall.
 - With the lunge's **Stop Distance**, check the swing actually reaches: if the weapon ends short of the target, every hit misses.
 
@@ -89,9 +106,39 @@ Checklist for turning an animation into an attack. Several of these fail silentl
 3. In the **Montage Sections** panel press **Clear**, so each section stops on its own. Linked sections (A→B→C→D, the default) play the whole combo from one press.
 4. Add a **Combo Window** notify state to every hit except the last; the last hit having none is what ends the combo.
    - Window **start** = the earliest a press is kept for the next hit.
-   - Window **end** = when a kept press chains. A press after the end, during the recovery, chains straight away.
+   - Window **end** = when a kept press chains. A press after the end, during the recovery, chains straight away. This sets the combo's speed, so end it as soon as the swing is over (where the hand stops moving fast), not at the end of the hit's clip: the hold and return to stance after it only play when the player stops.
    - Keep the window inside its own section.
+   - The window's end also starts the hit's **recovery**: from there, moving or jumping stops the attack too (see Recovery below).
 5. A press that resolves to a different ability (e.g. the target is now Far) cancels into that ability instead of the next hit. A pause past the end of a hit drops the combo, and the next press starts from the first hit.
+
+### Recovery
+
+- An attack with no Combo Window (a finisher, a launcher, the Riser) gets a **Recovery** notify state from the point its action is over to the end of the montage.
+- From the recovery's start, an attack press starts the next attack straight away, a jump cancels, and movement stops the attack (once it's been in recovery the resolver's **Movement Cancel Delay**, 0.1 s, so a press just after a combo hit still chains with the stick held). Moving or jumping out ends the combo string.
+- Left alone, the recovery plays out, so the animation still settles when the player does nothing. This is the baseline for every attack, hit or whiff; earlier cancels on hit are a later, bought ability (design doc, Cancel abilities).
+
+### Combo strings and finishers
+
+- The **combo counter** (on the Combat Loadout component, so it will carry over a swap) counts every attack in a string, whichever ability it is and whether it hits or not. A string ends when an attack finishes with nothing chained into it, when an attack is cancelled (e.g. a jump), when the finisher has been used, or when the stance changes: air attacks after ground ones start an air string of their own, so launcher → Riser → air combo begins counting again in the air.
+- **Ground Combo Length** and **Air Combo Length** on the loadout (4 and 3) say how many attacks a string has. The last one is the finisher: for it the context gets `Context.Combo.Finisher`, so the **Finisher** rule (`Slot.Finisher.Ground` / `Slot.Finisher.Air`, ranked just below Riser) replaces whatever the grid would have picked. 0 means no finisher.
+- With the finisher slot empty, the press falls through to the grid as usual, e.g. the last section of the ground combo montage.
+- A finisher montage has no Combo Window, so nothing chains out of it; the next press after it is the first of a new string.
+- The on-screen debug shows the string as `Combo: 2/4 ground`, and each ATTACK message and log line has the count.
+- The current finishers, `TestFinisher` (ground: knocks the target far away with a small pop) and `TestFinisherAir` (spikes it down), both use the `Manny_Ability_R` overhead slam as a placeholder. Their montages are built by a script like the air combo's.
+
+**Building a combo montage from a script.** `UCombatMontageLibrary::BuildComboMontage` (editor module) does steps 1–3 and the Blend Out Trigger Time in one go: give it an asset path and the hit sequences in order. Rerunning it on an existing montage rebuilds its track and sections. `Manny_AirCombo_Montage` was made this way, with its notifies laid out per hit; to swap in real air attacks, change the sequence list and rerun (ask Claude, or call it from editor Python as `unreal.CombatMontageLibrary.build_combo_montage(path, [seq, ...])`).
+
+### Air attacks
+
+- **Air Hang Gravity Scale** on the ability (1 = off): while the attack plays in the air, the character's gravity is multiplied by it, and each attack or combo hit starts by stopping the fall. With the target held up by its hits (see Launch Speed above), the character and the target both stay in the air for the combo. Gravity goes back to normal when the attack's recovery starts (so the character drops out of a hit it doesn't follow up), or when it ends, is cancelled, or the character lands. Landing during an air attack's recovery ends the attack. **Air Hang Time** (0 = the whole attack) ends the hang that long into the attack instead, so the character drops out of a long recovery, as the air finisher does after its slam.
+- In the air, a **Combat Lunge** moves across only and keeps the character's height, like on the ground. With **Lunge Matches Height** on the ability, it also moves to the target's height (homing), stopping **Lunge Stop Distance** short across it, up to **Lunge Reach** in all. The air combo leaves it off: its hits step in and push the target back the way the ground combo does, without pulling the character up or down to it; only the Riser homes in.
+- A Hit Window that closes without hitting anything prints a red **WHIFF** message with where the target was (across, and above or below). The dummy shows its air state and its last few hits above its head (**Show Hit Debug**).
+- A launched dummy's knockback dies off in the air (**Air Braking Deceleration** on the dummy), so it drifts a little and then hangs instead of sailing out of range. For a launcher to float the dummy at its peak, its Hit Stun has to outlast the climb: about Launch Speed / 980 seconds (0.9 s at 900).
+- When an air hold runs out with the dummy still in the air, it floats down on the dummy's **Juggle Fall Gravity Scale** (0.5) until it lands or is hit again, instead of dropping. A launch, slam or knock-away falls on normal gravity.
+- The current air combo (`TestCloseAir`, `Manny_AirCombo_Montage`): three wide, arcing swings retargeted from Paragon (Kallari's air slash, Greystone's spinning jump attack, the air slash again), with Hit Windows over the whole arc and a 1.75× hit radius, so they're forgiving the way KH's aerials are. Each air hit steps in across (Lunge Reach 120, no height matching) and pushes the dummy back (Knockback 350). In a full air string the third hit is replaced by the air finisher (`TestFinisherAir`, Kallari's in-air spinning ultimate), which knocks the dummy far away (KH Aerial Finish style) so the string can't be followed up. The montage's own third hit knocks away the same way and only plays with the Finisher.Air slot empty.
+- **Retargeting from the Paragon packs:** `Content/Combat/Retarget` holds auto-generated IK Rigs (`IK_Manny_Auto`, `IK_Greystone_Auto`, `IK_Kallari_Auto`) and retargeters (`RTG_Greystone_To_Manny`, `RTG_Kallari_To_Manny`), set up the way the Retarget Animations window does it. To bring in another animation, right-click it > Retarget Animations and pick the RTG, or ask Claude, which uses the same setup from a script. Results go in `Content/Combat/Animations` as `Manny_GS_*` / `Manny_KA_*`, with the packs' notifies removed.
+- **After the air string's last hit** (the finisher, or the montage's third hit with no finisher slotted), air attacks are spent until the character lands: attack presses in the air are ignored, so the finisher's recovery lasts to the ground instead of starting another air string. Movement can still cut the recovery; the character just falls. The debug text shows "air attacks spent until landing" meanwhile.
+- **Juggle loop:** to keep a target up, skip the finisher. Jump, do two air hits, let yourself drop, land, and jump again; landing ends the air string, so the next jump starts a fresh one. Each air hit holds the target for its Hit Stun (0.9 s), and it floats down after that.
 
 ## Third-party content
 

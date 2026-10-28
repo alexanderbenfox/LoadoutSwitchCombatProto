@@ -4,6 +4,7 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Loadout/CombatLoadoutComponent.h"
 
 #include "Kismet/GameplayStatics.h"
 
@@ -56,6 +57,13 @@ UCombatContextComponent::UCombatContextComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 }
 
+void UCombatContextComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	LoadoutComponent = GetOwner()->FindComponentByClass<UCombatLoadoutComponent>();
+}
+
 FGameplayTagContainer UCombatContextComponent::BuildContext() const
 {
 	FGameplayTagContainer Context;
@@ -85,9 +93,8 @@ FGameplayTagContainer UCombatContextComponent::BuildContext() const
 		}
 	}
 
-	// target state
-	const bool bIsTargetAirborne = IsAirborne_Internal(Target.Get());
-	if (bIsTargetAirborne)
+	// target state: only a target properly up in the air counts, not one popped up a little by a hit
+	if (IsTargetAirborne())
 	{
 		Context.AddTag(CombatTags::Context_Target_Airborne);
 	}
@@ -118,7 +125,11 @@ FGameplayTagContainer UCombatContextComponent::BuildContext() const
 		Context.AddTag(CombatTags::Context_Recent_Swap);
 	}
 
-	// TODO: Add combo counter + query the combo count data from weapon data (or weapon ability data) to see if we are on the finisher
+	// combo position: the next attack is the last of the string in this stance
+	if (LoadoutComponent && LoadoutComponent->IsNextAttackFinisher(bIsPlayerAirborne))
+	{
+		Context.AddTag(CombatTags::Context_Combo_Finisher);
+	}
 
 	return Context;
 }
@@ -177,6 +188,35 @@ bool UCombatContextComponent::IsAirborne() const
 	return IsAirborne_Internal(GetOwner());
 }
 
+bool UCombatContextComponent::IsTargetAirborne() const
+{
+	if (!IsAirborne_Internal(Target.Get()))
+	{
+		return false;
+	}
+	return TargetAirborneMinHeight <= 0.0f || GetTargetHeightAboveGround(TargetAirborneMinHeight) >= TargetAirborneMinHeight;
+}
+
+float UCombatContextComponent::GetTargetHeightAboveGround(float MaxDistance) const
+{
+	const ACharacter* TargetCharacter = Cast<ACharacter>(Target.Get());
+	if (!TargetCharacter)
+	{
+		return MaxDistance;
+	}
+
+	const FVector Feet = TargetCharacter->GetActorLocation() - FVector(0.0f, 0.0f, TargetCharacter->GetSimpleCollisionHalfHeight());
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(TargetHeightAboveGround), false, TargetCharacter);
+	Params.AddIgnoredActor(GetOwner());
+
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, Feet, Feet - FVector(0.0f, 0.0f, MaxDistance), ECC_Visibility, Params))
+	{
+		return Hit.Distance;
+	}
+	return MaxDistance;
+}
+
 float UCombatContextComponent::GetDistanceToTarget() const
 {
 	const AActor* TargetActor = Target.Get();
@@ -233,9 +273,10 @@ void UCombatContextComponent::DrawDebug() const
 
 	if (GEngine)
 	{
-		const FString Text = FString::Printf(TEXT("Target: %s  (%.0f cm, %s, %d nearby)\nContext: %s"),
+		const FString Text = FString::Printf(TEXT("Target: %s  (%.0f cm, %s, %d nearby, %.0f cm up / airborne from %.0f)\nContext: %s"),
 			*GetNameSafe(TargetActor), GetDistanceToTarget(), *UEnum::GetDisplayValueAsText(RangeBand).ToString(),
-			CountEnemiesNearTarget(), *BuildContext().ToStringSimple());
+			CountEnemiesNearTarget(), TargetActor ? GetTargetHeightAboveGround(1000.0f) : 0.0f, TargetAirborneMinHeight,
+			*BuildContext().ToStringSimple());
 
 		// a fixed key replaces last frame's message instead of stacking a new line every tick
 		GEngine->AddOnScreenDebugMessage(static_cast<uint64>(GetUniqueID()), 0.0f, FColor::Cyan, Text);

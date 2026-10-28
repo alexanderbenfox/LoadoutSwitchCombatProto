@@ -1,8 +1,11 @@
 #include "Combat/CombatResolverComponent.h"
 #include "Animation/AnimMontage.h"
 #include "Combat/CombatContextComponent.h"
+#include "Combat/CombatHitStopSubsystem.h"
 #include "Combat/CombatResolverRules.h"
 #include "Combat/CombatWeaponComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Curves/CurveFloat.h"
 #include "DrawDebugHelpers.h"
 #include "Enemy/CombatDummy.h"
 #include "Engine/Engine.h"
@@ -14,6 +17,38 @@
 #include "Loadout/CombatLoadout.h"
 #include "Loadout/CombatLoadoutComponent.h"
 #include "LoadoutSwitchCombatProto.h"
+
+namespace
+{
+	/** An actor's location, velocity and whether it's in the air, for the hit log */
+	FString DescribeForLog(const AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return TEXT("(none)");
+		}
+
+		const ACharacter* Char = Cast<ACharacter>(Actor);
+		const UCharacterMovementComponent* Movement = Char ? Char->GetCharacterMovement() : nullptr;
+		const FVector Location = Actor->GetActorLocation();
+		const FVector Velocity = Actor->GetVelocity();
+		return FString::Printf(TEXT("%s at (%.0f, %.0f, %.0f) vel (%.0f, %.0f, %.0f) %s"), *Actor->GetName(),
+			Location.X, Location.Y, Location.Z, Velocity.X, Velocity.Y, Velocity.Z,
+			Movement && Movement->IsFalling() ? TEXT("in air") : TEXT("on ground"));
+	}
+
+	/** Where To is from From: how far across, and how far above or below */
+	FString DescribeOffset(const AActor* From, const AActor* To)
+	{
+		if (!From || !To)
+		{
+			return TEXT("no target");
+		}
+
+		const FVector Offset = To->GetActorLocation() - From->GetActorLocation();
+		return FString::Printf(TEXT("target %.0f cm across, %.0f cm %s"), Offset.Size2D(), FMath::Abs(Offset.Z), Offset.Z >= 0.0 ? TEXT("above") : TEXT("below"));
+	}
+}
 
 UCombatResolverComponent::UCombatResolverComponent()
 {
@@ -27,6 +62,24 @@ void UCombatResolverComponent::BeginPlay()
 	ContextComponent = GetOwner()->FindComponentByClass<UCombatContextComponent>();
 	LoadoutComponent = GetOwner()->FindComponentByClass<UCombatLoadoutComponent>();
 	GetOwner()->GetComponents<UCombatWeaponComponent>(WeaponComponents);
+
+	if (const ACharacter* Char = Cast<ACharacter>(GetOwner()))
+	{
+		DefaultGravityScale = Char->GetCharacterMovement()->GravityScale;
+	}
+
+	// 1 - (1 - t)^2 as a cubic key pair: slope 2 at the start, 0 at the top, so the rise hands over to gravity with no jolt
+	DefaultRiseCurve = NewObject<UCurveFloat>(this, TEXT("DefaultRiseCurve"), RF_Transient);
+	const FKeyHandle StartKey = DefaultRiseCurve->FloatCurve.AddKey(0.0f, 0.0f);
+	const FKeyHandle EndKey = DefaultRiseCurve->FloatCurve.AddKey(1.0f, 1.0f);
+	for (const FKeyHandle Key : { StartKey, EndKey })
+	{
+		FRichCurveKey& CurveKey = DefaultRiseCurve->FloatCurve.GetKey(Key);
+		CurveKey.InterpMode = RCIM_Cubic;
+		CurveKey.TangentMode = RCTM_User;
+	}
+	DefaultRiseCurve->FloatCurve.GetKey(StartKey).LeaveTangent = 2.0f;
+	DefaultRiseCurve->FloatCurve.GetKey(EndKey).ArriveTangent = 0.0f;
 }
 
 FCombatResolution UCombatResolverComponent::Resolve() const
@@ -71,8 +124,18 @@ FCombatResolution UCombatResolverComponent::Resolve() const
 
 void UCombatResolverComponent::HandleAttackPressed()
 {
+	// the air string has been finished: nothing more until the ground
+	if (bAirAttacksSpent && ContextComponent && ContextComponent->IsAirborne())
+	{
+		if (bLogHits)
+		{
+			UE_LOG(LogCombatProto, Log, TEXT("[Hit] PRESS IGNORED: air attacks spent until landing"));
+		}
+		return;
+	}
+
 	float AbilityTimeRemaining = GetCurrentAbilityTimeRemaining();
-	const bool bComboPending = bComboWindowOpen || bCanChain;
+	const bool bComboPending = bComboWindowOpen || bCanChain || bRecoveryOpen;
 	if (AbilityTimeRemaining >= BufferTime && !bComboPending )
 	{
 		return;
@@ -91,29 +154,66 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const UCombatAbilityDefinition* Ability = Resolution.Ability;
 
 	float AbilityTimeRemaining = GetCurrentAbilityTimeRemaining();
-	if (( bCanChain || AbilityTimeRemaining <= 0.f ) && bAbilityQueued )
+	bool bAttackStarted = false;
+	if (( bCanChain || bRecoveryOpen || AbilityTimeRemaining <= 0.f ) && bAbilityQueued )
 	{
+		bAttackStarted = true;
+
+		// the stance the attack resolved in, read before it plays: a rise or lunge moves the character afterwards
+		const bool bAirAttack = ContextComponent && ContextComponent->IsAirborne();
+
 		FName ChainName = GetChainSection(Ability);
 		bAbilityActive = PlayAbilityMontage(Ability, ChainName);
 		ActiveAbility = bAbilityActive ? Ability : nullptr;
-		
+		AttackStartTime = GetWorld()->GetTimeSeconds();
+
 		bAbilityQueued = false;
 		bComboWindowOpen = false;
 		bCanChain = false;
+		bRecoveryOpen = false;
 		bHitWindowOpen = false;
 		bAttackConnected = false;
+
+		// count it into the string; one that didn't play doesn't count
+		if (bAbilityActive && LoadoutComponent)
+		{
+			const int32 ComboIndex = LoadoutComponent->AdvanceCombo(bAirAttack);
+
+			// the air string's last hit: no more air attacks until landing
+			const int32 AirLength = LoadoutComponent->GetComboLength(true);
+			if (bAirAttack && AirLength > 0 && ComboIndex == AirLength)
+			{
+				bAirAttacksSpent = true;
+			}
+		}
 
 		// say which ability the press resolved to, so it still reads before every ability has a montage
 		if (bShowDebug && GEngine)
 		{
-			const FString Text = Ability ? FString::Printf(TEXT("ATTACK: %s"), *Ability->DisplayName.ToString()) : FString(TEXT("ATTACK: (nothing resolved)"));
+			const FString Text = Ability ? FString::Printf(TEXT("ATTACK: %s  (%s)"), *Ability->DisplayName.ToString(), *DescribeCombo()) : FString(TEXT("ATTACK: (nothing resolved)"));
 
 			// key -1 adds a new line each press, so a string of attacks reads as a list
 			GEngine->AddOnScreenDebugMessage(-1, 1.5f, Ability ? Ability->DebugColor : FColor::Red, Text);
 		}
+
+		if (bLogHits)
+		{
+			// the context it resolved from (range is measured across only, so height doesn't change Close/Far), and where everyone was
+			const AActor* Target = ContextComponent ? ContextComponent->GetTarget() : nullptr;
+			const FString Context = ContextComponent ? ContextComponent->BuildContext().ToStringSimple() : FString();
+			const FString Name = bAbilityActive ? GetHitDebugLabel() : Ability ? Ability->GetName() + TEXT(" (no montage played)") : FString(TEXT("(nothing resolved)"));
+			UE_LOG(LogCombatProto, Log, TEXT("[Hit] ATTACK %s  slot %s  combo %s  context [%s]  %s | player %s | target %s"),
+				*Name, *Slot.ToString(), *DescribeCombo(), *Context, *DescribeOffset(GetOwner(), Target), *DescribeForLog(GetOwner()), *DescribeForLog(Target));
+		}
 	}
 	else if (AbilityTimeRemaining <= 0.f)
 	{
+		// ended with nothing chained into it: the string is over, and the next press starts a new one
+		if (bAbilityActive)
+		{
+			EndComboString(TEXT("attack ended"));
+		}
+
 		bAbilityActive = false;
 	}
 
@@ -121,7 +221,10 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	{
 		bComboWindowOpen = false;
 		bCanChain = false;
+		bRecoveryOpen = false;
 	}
+
+	UpdateAirHang(bAttackStarted && bAbilityActive);
 
 	if (!bShowDebug && !bShowReticle)
 	{
@@ -130,9 +233,10 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 
 	if (bShowDebug && GEngine)
 	{
-		const FString Text = FString::Printf(TEXT("Slot: %s\nAbility: %s"),
+		const FString Text = FString::Printf(TEXT("Slot: %s\nAbility: %s\nCombo: %s%s"),
 			Slot.IsValid() ? *Slot.ToString() : TEXT("(none)"),
-			Ability ? *Ability->DisplayName.ToString() : TEXT("(none)"));
+			Ability ? *Ability->DisplayName.ToString() : TEXT("(none)"),
+			*DescribeCombo(), bAirAttacksSpent ? TEXT("  (air attacks spent until landing)") : TEXT(""));
 
 		// a fixed key replaces last frame's message instead of stacking a new line every tick
 		GEngine->AddOnScreenDebugMessage(static_cast<uint64>(GetUniqueID()), 0.0f, FColor::Orange, Text);
@@ -147,7 +251,41 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 
 bool UCombatResolverComponent::CanJumpNow() const
 {
-	return !bAbilityActive || (ActiveAbility && ActiveAbility->bJumpCancelable);
+	return !bAbilityActive || IsInRecovery() || (ActiveAbility && ActiveAbility->bJumpCancelable);
+}
+
+void UCombatResolverComponent::HandleMovementInput()
+{
+	// a kept press is about to chain; let it, rather than the held stick ending the combo
+	if (!IsInRecovery() || bAbilityQueued || GetWorld()->GetTimeSeconds() - RecoveryStartTime < MovementCancelDelay)
+	{
+		return;
+	}
+
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] MOVE CANCEL %s  t %.3f"), *GetHitDebugLabel(), GetActiveMontagePosition());
+	}
+
+	CancelAttack();
+}
+
+void UCombatResolverComponent::HandleLanded()
+{
+	bAirAttacksSpent = false;
+
+	// a kept press still chains: it resolves on the ground now, e.g. into the Riser under a juggled target
+	if (!IsInRecovery() || bAbilityQueued)
+	{
+		return;
+	}
+
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] LAND CANCEL %s  t %.3f"), *GetHitDebugLabel(), GetActiveMontagePosition());
+	}
+
+	CancelAttack();
 }
 
 void UCombatResolverComponent::CancelAttack()
@@ -164,16 +302,85 @@ void UCombatResolverComponent::CancelAttack()
 			Char->StopAnimMontage(ActiveAbility->Montage);
 		}
 
-		// the name StartLunge gives its root motion source
+		// the names StartLunge and StartRise give their root motion sources
 		Char->GetCharacterMovement()->RemoveRootMotionSource(TEXT("CombatLunge"));
+		Char->GetCharacterMovement()->RemoveRootMotionSource(TEXT("CombatRise"));
 	}
 
 	bAbilityActive = false;
 	bAbilityQueued = false;
 	bComboWindowOpen = false;
 	bCanChain = false;
+	bRecoveryOpen = false;
 	bHitWindowOpen = false;
 	ActiveAbility = nullptr;
+	EndComboString(TEXT("attack cancelled"));
+
+	// put gravity back now rather than next tick, so a jump cancel out of an air attack jumps with normal gravity
+	UpdateAirHang(false);
+}
+
+void UCombatResolverComponent::EndComboString(const TCHAR* Why)
+{
+	if (!LoadoutComponent || LoadoutComponent->GetComboCount() == 0)
+	{
+		return;
+	}
+
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] COMBO END after %s: %s"), *DescribeCombo(), Why);
+	}
+
+	LoadoutComponent->ResetCombo();
+}
+
+FString UCombatResolverComponent::DescribeCombo() const
+{
+	if (!LoadoutComponent || LoadoutComponent->GetComboCount() == 0)
+	{
+		return TEXT("-");
+	}
+
+	const bool bAir = LoadoutComponent->IsComboInAir();
+	const int32 Length = LoadoutComponent->GetComboLength(bAir);
+	const FString LengthText = Length > 0 ? FString::FromInt(Length) : FString(TEXT("-"));
+	return FString::Printf(TEXT("%d/%s %s%s"), LoadoutComponent->GetComboCount(), *LengthText, bAir ? TEXT("air") : TEXT("ground"),
+		Length > 0 && LoadoutComponent->GetComboCount() == Length ? TEXT(" finisher") : TEXT(""));
+}
+
+void UCombatResolverComponent::UpdateAirHang(bool bAttackStarted)
+{
+	ACharacter* Char = Cast<ACharacter>(GetOwner());
+	if (!Char)
+	{
+		return;
+	}
+
+	UCharacterMovementComponent* Movement = Char->GetCharacterMovement();
+	// the hang lasts while the attack is acting: it ends at the recovery, so the character drops out of a swing it doesn't follow up
+	// (land, then jump again to keep a juggle going), or earlier with an Air Hang Time
+	const bool bHangTimeLeft = ActiveAbility && !IsInRecovery()
+		&& (ActiveAbility->AirHangTime <= 0.f || GetWorld()->GetTimeSeconds() - AttackStartTime < ActiveAbility->AirHangTime);
+	const float HangScale = (bAbilityActive && bHangTimeLeft) ? ActiveAbility->AirHangGravityScale : 1.0f;
+	const bool bShouldHang = HangScale < 1.0f && Movement->IsFalling();
+
+	if (bShouldHang)
+	{
+		// each attack of an air combo stops the fall, KH style; a rise still going up is stopped too, so the swing happens in place
+		if (bAttackStarted || !bAirHanging)
+		{
+			Movement->Velocity.Z = 0.0;
+		}
+
+		Movement->GravityScale = DefaultGravityScale * HangScale;
+		bAirHanging = true;
+	}
+	else if (bAirHanging)
+	{
+		Movement->GravityScale = DefaultGravityScale;
+		bAirHanging = false;
+	}
 }
 
 bool UCombatResolverComponent::PlayAbilityMontage(const UCombatAbilityDefinition* Ability, FName StartSection) const
@@ -257,17 +464,42 @@ void UCombatResolverComponent::HandleComboWindowEnd(const UAnimSequenceBase* Ani
 
 	bComboWindowOpen = false;
 	bCanChain = true;
+	RecoveryStartTime = GetWorld()->GetTimeSeconds();
 }
 
-void UCombatResolverComponent::HandleHitWindowBegin(const UAnimSequenceBase* Animation, float RadiusScale, const TArray<FName>& WeaponNames)
+void UCombatResolverComponent::HandleRecoveryBegin(const UAnimSequenceBase* Animation)
 {
 	if (!IsActiveAbilityMontage(Animation))
 	{
 		return;
 	}
 
+	bRecoveryOpen = true;
+	RecoveryStartTime = GetWorld()->GetTimeSeconds();
+
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] RECOVERY %s  t %.3f  hit %d"), *GetHitDebugLabel(), GetActiveMontagePosition(), bAttackConnected);
+	}
+}
+
+void UCombatResolverComponent::HandleHitWindowBegin(const UAnimSequenceBase* Animation, float RadiusScale, const TArray<FName>& WeaponNames, const FCombatHitSettingsOverride& HitOverrides)
+{
+	if (!IsActiveAbilityMontage(Animation))
+	{
+		if (bLogHits)
+		{
+			UE_LOG(LogCombatProto, Log, TEXT("[Hit] WINDOW IGNORED on %s: not the active ability's montage (active %s, attacking %d)"),
+				*GetNameSafe(Animation), ActiveAbility ? *GetNameSafe(ActiveAbility->Montage) : TEXT("(none)"), bAbilityActive);
+		}
+		return;
+	}
+
 	bHitWindowOpen = true;
 	HitRadiusScale = RadiusScale;
+
+	// IsActiveAbilityMontage passing means ActiveAbility is set
+	ActiveHitSettings = HitOverrides.ApplyTo(ActiveAbility->Hit);
 	HitActors.Reset();
 
 	// the window's weapons: the ones it names, or all of them if it names none.
@@ -286,6 +518,15 @@ void UCombatResolverComponent::HandleHitWindowBegin(const UAnimSequenceBase* Ani
 	{
 		UE_LOG(LogCombatProto, Warning, TEXT("Hit Window on '%s' matched no Combat Weapon components on '%s'; check its Weapons names"),
 			*GetNameSafe(Animation), *GetNameSafe(GetOwner()));
+	}
+
+	if (bLogHits)
+	{
+		const AActor* Target = ContextComponent ? ContextComponent->GetTarget() : nullptr;
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] WINDOW OPEN %s  t %.3f  weapons %d  radius x%.2f  dmg %.0f stun %.2f launch %.0f kb %.0f  %s | player %s | target %s"),
+			*GetHitDebugLabel(), GetActiveMontagePosition(), ActiveSweeps.Num(), HitRadiusScale,
+			ActiveHitSettings.Damage, ActiveHitSettings.HitStun, ActiveHitSettings.LaunchSpeed, ActiveHitSettings.KnockbackSpeed,
+			*DescribeOffset(GetOwner(), Target), *DescribeForLog(GetOwner()), *DescribeForLog(Target));
 	}
 }
 
@@ -309,9 +550,58 @@ void UCombatResolverComponent::HandleHitWindowEnd(const UAnimSequenceBase* Anima
 		return;
 	}
 
+	// where the target was relative to us, to tell a target out of reach across from one above or below the swing
+	const AActor* Target = ContextComponent ? ContextComponent->GetTarget() : nullptr;
+
+	// a window that closes having hit nothing is the usual reason a combo or juggle doesn't carry on
+	if (bShowDebug && bHitWindowOpen && HitActors.IsEmpty() && GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, FString::Printf(TEXT("WHIFF: %s  (%s)"), *GetHitDebugLabel(), *DescribeOffset(GetOwner(), Target)));
+	}
+
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] WINDOW CLOSE %s  t %.3f  %s  hits %d%s  %s | player %s | target %s"),
+			*GetHitDebugLabel(), GetActiveMontagePosition(), bHitWindowOpen ? TEXT("") : TEXT("(was not open)"), HitActors.Num(),
+			bHitWindowOpen && HitActors.IsEmpty() ? TEXT(" WHIFF") : TEXT(""),
+			*DescribeOffset(GetOwner(), Target), *DescribeForLog(GetOwner()), *DescribeForLog(Target));
+	}
+
 	bHitWindowOpen = false;
 	HitActors.Reset();
 	ActiveSweeps.Reset();
+}
+
+FString UCombatResolverComponent::GetHitDebugLabel() const
+{
+	if (!ActiveAbility)
+	{
+		return TEXT("(no ability)");
+	}
+
+	FString Label = ActiveAbility->DisplayName.IsEmpty() ? ActiveAbility->GetName() : ActiveAbility->DisplayName.ToString();
+
+	// the combo section, so each hit of a combo reads separately
+	const ACharacter* Char = Cast<ACharacter>(GetOwner());
+	const UAnimInstance* AnimInstance = Char && Char->GetMesh() ? Char->GetMesh()->GetAnimInstance() : nullptr;
+	if (AnimInstance && ActiveAbility->Montage && ActiveAbility->Montage->CompositeSections.Num() > 1)
+	{
+		Label += FString::Printf(TEXT(" %s"), *AnimInstance->Montage_GetCurrentSection(ActiveAbility->Montage).ToString());
+	}
+
+	return Label;
+}
+
+float UCombatResolverComponent::GetActiveMontagePosition() const
+{
+	const ACharacter* Char = Cast<ACharacter>(GetOwner());
+	const UAnimInstance* AnimInstance = Char && Char->GetMesh() ? Char->GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance || !ActiveAbility || !ActiveAbility->Montage || !AnimInstance->Montage_IsPlaying(ActiveAbility->Montage))
+	{
+		return -1.0f;
+	}
+
+	return AnimInstance->Montage_GetPosition(ActiveAbility->Montage);
 }
 
 void UCombatResolverComponent::SweepWeapon(FWeaponSweep& Sweep)
@@ -325,6 +615,32 @@ void UCombatResolverComponent::SweepWeapon(FWeaponSweep& Sweep)
 	FVector HitStart;
 	FVector HitEnd;
 	Weapon->GetHitSegment(HitStart, HitEnd);
+
+	if (bLogHits)
+	{
+		// how close this frame's hit segment came to the target's capsule: a gap of 0 or less means it's touching
+		FString TargetText = TEXT("no target");
+		const ACharacter* TargetChar = ContextComponent ? Cast<ACharacter>(ContextComponent->GetTarget()) : nullptr;
+		if (const UCapsuleComponent* Capsule = TargetChar ? TargetChar->GetCapsuleComponent() : nullptr)
+		{
+			const float Radius = Capsule->GetScaledCapsuleRadius();
+			const FVector Center = Capsule->GetComponentLocation();
+			const FVector Axis = Capsule->GetUpVector() * (Capsule->GetScaledCapsuleHalfHeight() - Radius);
+
+			FVector OnSegment;
+			FVector OnAxis;
+			FMath::SegmentDistToSegmentSafe(HitStart, HitEnd, Center - Axis, Center + Axis, OnSegment, OnAxis);
+			const float Gap = FVector::Dist(OnSegment, OnAxis) - Radius - Weapon->GetHitRadius() * HitRadiusScale;
+			const FVector FromCenter = OnSegment - Center;
+
+			TargetText = FString::Printf(TEXT("gap to target %.0f cm (nearest weapon point %.0f across, %.0f up from its centre)"),
+				Gap, FromCenter.Size2D(), FromCenter.Z);
+		}
+
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit]   SWEEP %s  t %.3f  %s  segment (%.0f, %.0f, %.0f) -> (%.0f, %.0f, %.0f)%s  %s"),
+			*GetHitDebugLabel(), GetActiveMontagePosition(), *Weapon->GetName(), HitStart.X, HitStart.Y, HitStart.Z, HitEnd.X, HitEnd.Y, HitEnd.Z,
+			Sweep.bHasLastHitSegment ? TEXT("") : TEXT(" (first frame, not swept)"), *TargetText);
+	}
 
 	// if has last hit segment, we can sweep from that to this frame's segment
 	if (Sweep.bHasLastHitSegment)
@@ -349,6 +665,11 @@ void UCombatResolverComponent::SweepWeapon(FWeaponSweep& Sweep)
 				if (!Hit.GetActor())
 				{
 					continue;
+				}
+
+				if (bLogHits && !HitActors.Contains(Hit.GetActor()))
+				{
+					UE_LOG(LogCombatProto, Log, TEXT("[Hit]   SWEEP touched %s (%s)"), *Hit.GetActor()->GetName(), *GetNameSafe(Hit.GetComponent()));
 				}
 
 				ApplyHit(Hit.GetActor(), Hit);
@@ -390,11 +711,28 @@ void UCombatResolverComponent::ApplyHit(AActor* Victim, const FHitResult& Hit)
 	HitActors.Add(Victim);
 	bAttackConnected = true;
 
-	Dummy->ReceiveHit(GetOwner(), ActiveAbility, Hit);
+	const FString Label = GetHitDebugLabel();
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] HIT %s  t %.3f  on %s  dmg %.0f stun %.2f launch %.0f kb %.0f stop %.2f"), *Label, GetActiveMontagePosition(),
+			*DescribeForLog(Victim), ActiveHitSettings.Damage, ActiveHitSettings.HitStun, ActiveHitSettings.LaunchSpeed, ActiveHitSettings.KnockbackSpeed,
+			ActiveHitSettings.HitStop);
+	}
+
+	Dummy->ReceiveHit(GetOwner(), ActiveHitSettings, Hit, Label);
+
+	// after the reaction, so the target freezes already flinching, with its launch or knockback waiting to play out.
+	// a hit on several enemies restarts the attacker's stop with each, rather than stacking
+	if (UCombatHitStopSubsystem* HitStop = GetWorld()->GetSubsystem<UCombatHitStopSubsystem>())
+	{
+		HitStop->StartHitStop(Victim, ActiveHitSettings.HitStop, HitStopTimeDilation);
+		HitStop->StartHitStop(GetOwner(), ActiveHitSettings.HitStop, HitStopTimeDilation);
+	}
 
 	if (bShowDebug && GEngine)
 	{
-		const FString Text = FString::Printf(TEXT("HIT: %s"), *GetNameSafe(Victim));
+		const FString Text = FString::Printf(TEXT("HIT (%s): %s  dmg %.0f  stun %.2fs  launch %.0f  knockback %.0f"), *Label, *GetNameSafe(Victim),
+			ActiveHitSettings.Damage, ActiveHitSettings.HitStun, ActiveHitSettings.LaunchSpeed, ActiveHitSettings.KnockbackSpeed);
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, Text);
 	}
 }
@@ -410,6 +748,77 @@ void UCombatResolverComponent::HandleLungeWindowBegin(float Duration)
 	StartLunge(ActiveAbility, Duration);
 }
 
+void UCombatResolverComponent::HandleRiseWindowBegin(const UAnimSequenceBase* Animation, float Duration)
+{
+	if (!IsActiveAbilityMontage(Animation))
+	{
+		return;
+	}
+
+	StartRise(ActiveAbility, Duration);
+}
+
+void UCombatResolverComponent::StartRise(const UCombatAbilityDefinition* Ability, float Duration) const
+{
+	ACharacter* Char = Cast<ACharacter>(GetOwner());
+	if (!Ability || Ability->RiseHeight <= 0.f || !Char)
+	{
+		return;
+	}
+
+	UCharacterMovementComponent* Movement = Char->GetCharacterMovement();
+	const FVector Start = Char->GetActorLocation();
+	FVector Target = Start + FVector::UpVector * Ability->RiseHeight;
+
+	// soft move to target: face it and drift across towards it on the way up, at most RiseReach, stopping LungeStopDistance short
+	if (const AActor* EnemyTarget = ContextComponent ? ContextComponent->GetTarget() : nullptr)
+	{
+		const FVector ToTarget2D = (EnemyTarget->GetActorLocation() - Start) * FVector(1.0, 1.0, 0.0);
+		const float Distance2D = ToTarget2D.Size();
+
+		if (Distance2D > KINDA_SMALL_NUMBER)
+		{
+			const FVector Direction2D = ToTarget2D / Distance2D;
+			Char->SetActorRotation(Direction2D.Rotation());
+
+			const float Drift = FMath::Clamp(Distance2D - Ability->LungeStopDistance, 0.0f, Ability->RiseReach);
+			Target += Direction2D * Drift;
+		}
+	}
+
+	// in Walking the movement component keeps the character on the floor, so the upward root motion would go nowhere
+	Movement->SetMovementMode(MOVE_Falling);
+
+	// gravity doesn't apply while an Override source runs, so the climb takes exactly Duration.
+	// to meet a launched target at its peak: launched at v, it tops out at v * v / (2 * g) after v / g seconds
+	// (g = 980 at default gravity, so 1000 cm/s peaks at ~510 cm after ~1 s)
+	// the dynamic variant only for its time mapping curve, which eases the move; the target itself doesn't move
+	TSharedPtr<FRootMotionSource_MoveToDynamicForce> Rise = MakeShared<FRootMotionSource_MoveToDynamicForce>();
+	Rise->InstanceName = TEXT("CombatRise");
+	Rise->AccumulateMode = ERootMotionAccumulateMode::Override;
+	Rise->Priority = 6;   // above the lunge; the two shouldn't overlap, but if they do the rise wins
+	Rise->StartLocation = Start;
+	Rise->InitialTargetLocation = Target;
+	Rise->TargetLocation = Target;
+	Rise->Duration = Duration;
+	Rise->TimeMappingCurve = Ability->RiseCurve ? Ability->RiseCurve.Get() : DefaultRiseCurve.Get();
+	Rise->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::SetVelocity;
+	Rise->FinishVelocityParams.SetVelocity = FVector::ZeroVector;  // the eased rise is already at ~0 speed at the top; gravity takes it from there
+
+	Movement->ApplyRootMotionSource(Rise);
+
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] RISE %s  from (%.0f, %.0f, %.0f) to (%.0f, %.0f, %.0f) over %.3fs"), *GetHitDebugLabel(),
+			Start.X, Start.Y, Start.Z, Target.X, Target.Y, Target.Z, Duration);
+	}
+
+	if (bShowDebug)
+	{
+		DrawDebugLine(GetWorld(), Start, Target, Ability->DebugColor, false, Duration);
+	}
+}
+
 void UCombatResolverComponent::StartLunge(const UCombatAbilityDefinition* Ability, float Duration) const
 {
 	if (!Ability || Ability->LungeReach <= 0.f)
@@ -423,47 +832,74 @@ void UCombatResolverComponent::StartLunge(const UCombatAbilityDefinition* Abilit
 	}
 
 	const AActor* Target = ContextComponent->GetTarget();
+	const FVector OwnerLocation = GetOwner()->GetActorLocation();
+	const bool bAirborne = ContextComponent->IsAirborne();
+
+	FVector FinalLocation;
 	if (!Target)
 	{
-		return;
-	}
+		// nothing to home in on: step straight ahead, so a combo into empty space still moves
+		if (Ability->LungeStepWithoutTarget <= 0.f)
+		{
+			if (bLogHits)
+			{
+				UE_LOG(LogCombatProto, Log, TEXT("[Hit] LUNGE %s skipped: no target"), *GetHitDebugLabel());
+			}
+			return;
+		}
 
-	const FVector OwnerLocation = GetOwner()->GetActorLocation();
-	const FVector TargetLocation = Target->GetActorLocation();
-
-	// set facing direction
-	FVector TargetVector = TargetLocation - OwnerLocation;
-
-	FRotator LungeRotator = TargetVector.Rotation();
-	LungeRotator.Pitch = 0;
-
-	GetOwner()->SetActorRotation(LungeRotator);
-
-	// calculate allowed distance of lunge
-	const bool bIsAirborne = ContextComponent->IsAirborne();
-	const float Length = bIsAirborne ? FVector::Dist(OwnerLocation, TargetLocation) : FVector::Dist2D(OwnerLocation, TargetLocation);
-	const float LungeLength = FMath::Min(Length - Ability->LungeStopDistance, Ability->LungeReach);
-	if (LungeLength <= 0.f)
-	{
-		return;
-	}
-
-	// use 2D distance on the ground, but 3D space in air
-	FVector FinalLocation;
-	if (bIsAirborne)
-	{
-		FVector Direction;
-		float TempLength;
-		TargetVector.ToDirectionAndLength(Direction, TempLength);
-
-		FinalLocation = Direction * LungeLength;
+		FinalLocation = OwnerLocation + FRotator(0.0, GetOwner()->GetActorRotation().Yaw, 0.0).Vector() * Ability->LungeStepWithoutTarget;
 	}
 	else
 	{
-		FinalLocation = LungeRotator.Vector() * LungeLength;
-	}
+		const FVector TargetLocation = Target->GetActorLocation();
 
-	FinalLocation = OwnerLocation + FinalLocation;
+		// set facing direction
+		FVector TargetVector = TargetLocation - OwnerLocation;
+
+		FRotator LungeRotator = TargetVector.Rotation();
+		LungeRotator.Pitch = 0;
+
+		GetOwner()->SetActorRotation(LungeRotator);
+
+		if (bAirborne && Ability->bLungeMatchesHeight)
+		{
+			// homing: in the air, line up with the target's height and stop LungeStopDistance short across it (staying put across if already
+			// closer), so the swing meets it whether it's above, below or level. Stopping short along the straight line instead left a
+			// target above or below out of the swing's reach
+			const FVector ToTarget2D = TargetVector * FVector(1.0, 1.0, 0.0);
+			const float Distance2D = ToTarget2D.Size();
+			const FVector Direction2D = Distance2D > KINDA_SMALL_NUMBER ? ToTarget2D / Distance2D : LungeRotator.Vector();
+			const FVector StopPoint = TargetLocation - Direction2D * FMath::Min(Ability->LungeStopDistance, Distance2D);
+
+			const FVector Move = (StopPoint - OwnerLocation).GetClampedToMaxSize(Ability->LungeReach);
+			if (Move.IsNearlyZero(1.0))
+			{
+				if (bLogHits)
+				{
+					UE_LOG(LogCombatProto, Log, TEXT("[Hit] LUNGE %s skipped: already in place (air, %s)"), *GetHitDebugLabel(), *DescribeOffset(GetOwner(), Target));
+				}
+				return;
+			}
+
+			FinalLocation = OwnerLocation + Move;
+		}
+		else
+		{
+			// across only, keeping the current height: on the ground, or in the air without height matching
+			const float LungeLength = FMath::Min(FVector::Dist2D(OwnerLocation, TargetLocation) - Ability->LungeStopDistance, Ability->LungeReach);
+			if (LungeLength <= 0.f)
+			{
+				if (bLogHits)
+				{
+					UE_LOG(LogCombatProto, Log, TEXT("[Hit] LUNGE %s skipped: already in place (ground, %s)"), *GetHitDebugLabel(), *DescribeOffset(GetOwner(), Target));
+				}
+				return;
+			}
+
+			FinalLocation = OwnerLocation + LungeRotator.Vector() * LungeLength;
+		}
+	}
 
 	// apply root motion
 	TSharedPtr<FRootMotionSource_MoveToForce> Move = MakeShared<FRootMotionSource_MoveToForce>();
@@ -483,6 +919,12 @@ void UCombatResolverComponent::StartLunge(const UCombatAbilityDefinition* Abilit
 	}
 	Char->GetCharacterMovement()->ApplyRootMotionSource(Move);
 
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] LUNGE %s (%s) from (%.0f, %.0f, %.0f) to (%.0f, %.0f, %.0f) over %.3fs  %s"), *GetHitDebugLabel(),
+			bAirborne ? TEXT("air") : TEXT("ground"), OwnerLocation.X, OwnerLocation.Y, OwnerLocation.Z, FinalLocation.X, FinalLocation.Y, FinalLocation.Z,
+			Duration, *DescribeOffset(GetOwner(), Target));
+	}
 
 	if (bShowDebug && GEngine)
 	{

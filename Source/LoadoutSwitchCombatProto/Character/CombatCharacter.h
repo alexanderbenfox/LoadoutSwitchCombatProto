@@ -112,11 +112,14 @@ protected:
 	virtual void NotifyControllerChanged() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
-	/** No jumping out of an attack unless its ability is Jump Cancelable. A blocked jump press is dropped, not saved for when the attack ends */
+	/** No jumping out of an attack unless it's in its recovery or its ability is Jump Cancelable. A blocked jump press is dropped, not saved for when the attack ends */
 	virtual bool CanJumpInternal_Implementation() const override;
 
-	/** A jump that went ahead during a Jump Cancelable attack cancels the attack */
+	/** A jump that went ahead during an attack cancels the attack */
 	virtual void OnJumped_Implementation() override;
+
+	/** Landing in an air attack's recovery ends the attack, so the character lands instead of finishing the air swing on the ground */
+	virtual void Landed(const FHitResult& Hit) override;
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);

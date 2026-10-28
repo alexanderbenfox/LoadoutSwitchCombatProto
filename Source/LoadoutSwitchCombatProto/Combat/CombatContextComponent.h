@@ -5,6 +5,8 @@
 #include "GameplayTagContainer.h"
 #include "CombatContextComponent.generated.h"
 
+class UCombatLoadoutComponent;
+
 UENUM(BlueprintType)
 enum class ECombatRangeBand : uint8
 {
@@ -50,6 +52,8 @@ public:
 
 protected:
 
+	virtual void BeginPlay() override;
+
 	/** Targets nearer than this are Close, the rest are Far. Measured horizontally; height is the stance's job. */
 	UPROPERTY(EditAnywhere, Category = "Context|Range", meta = (ClampMin = 0, Units = "cm"))
 	float CloseRange = 250.0f;
@@ -65,6 +69,13 @@ protected:
 	/** This many enemies in the radius, the target included, makes it a Crowd; fewer is Single */
 	UPROPERTY(EditAnywhere, Category = "Context|Crowd", meta = (ClampMin = 1))
 	int32 CrowdThreshold = 3;
+
+	/**
+	 *  How high off the ground a falling target has to be to count as airborne (Context.Target.Airborne, the Riser), so a hit that
+	 *  only pops it up a little, or the last bit of its fall, still reads as grounded. Measured from the bottom of its capsule; 0 = any fall
+	 */
+	UPROPERTY(EditAnywhere, Category = "Context|Target", meta = (ClampMin = 0, Units = "cm"))
+	float TargetAirborneMinHeight = 120.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Context|Windows", meta = (ClampMin = 0, Units = "s"))
 	float PostDodgeWindow = 0.4f;
@@ -84,12 +95,22 @@ private:
 	/** Horizontal distance from the owner to the target, or a negative value with no target */
 	float GetDistanceToTarget() const;
 
+	/** The target is falling and at least TargetAirborneMinHeight off the ground */
+	bool IsTargetAirborne() const;
+
+	/** How far the bottom of the target's capsule is above the ground, looking down no further than MaxDistance (returned when nothing is hit) */
+	float GetTargetHeightAboveGround(float MaxDistance) const;
+
 	/** How many enemies are within CrowdRadius of the target, the target included; 0 with no target */
 	int32 CountEnemiesNearTarget() const;
 
 	void DrawDebug() const;
 
 	TWeakObjectPtr<AActor> Target;
+
+	/** The owner's loadout component, found at BeginPlay; its combo counter says when the next attack is the finisher */
+	UPROPERTY(Transient)
+	TObjectPtr<UCombatLoadoutComponent> LoadoutComponent;
 
 	/** Updated every tick so the hysteresis has a "last frame" to compare against */
 	ECombatRangeBand RangeBand = ECombatRangeBand::Far;

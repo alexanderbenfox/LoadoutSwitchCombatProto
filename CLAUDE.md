@@ -28,7 +28,7 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 - Target-airborne detection, later: once enemies have an Ability System component, the enemy owns its combat state as tags and the context component reads those instead of movement state. Working names: `State.Floating` (launched, juggled or flying; a valid Riser / air-juggle target) and `State.Vulnerable` (staggered). The two can be held together, e.g. launched and staggered. The player's own stance stays on `IsFalling`.
 
 - Soft targeting: `ACombatCharacter::UpdateSoftTarget` scores enemies by distance plus angle off the camera's forward, with a switch margin against flicker. Move it into the Targeting component when hard lock is built (hard lock overrides it). Possible addition: bias by movement-stick direction while the stick is held.
-- Hit reactions (`HitLaunchSpeed`, `HitKnockbackSpeed`) are applied in `ACombatDummy::ReceiveHit` for now; a Gameplay Effect / hit-react ability later. Knockback runs along the attacker's flattened facing, not the hit's `ImpactNormal` (unreliable when the sweep starts inside the capsule).
+- Hit reactions (`FCombatHitSettings`: the ability's defaults, overridden per Hit Window by `FCombatHitSettingsOverride`) are applied in `ACombatDummy::ReceiveHit` for now; a Gameplay Effect / hit-react ability later. Knockback runs along the attacker's flattened facing, not the hit's `ImpactNormal` (unreliable when the sweep starts inside the capsule).
 - Lock-on indicator shows what the press will do: the lock-on symbol itself changes to show whether the resolved attack is a Close move, a Far move, or will miss (target out of the resolved move's reach). Replaces the debug reticle; reads from the same `Resolve()` prediction so indicator and press never disagree.
 
 ## Milestones
@@ -37,6 +37,9 @@ Design doc (source of truth): https://claude.ai/code/artifact/b7553e58-edd9-40bb
 
 ## Conventions
 - Prototype animations: Paragon (Greystone/Kallari/Sparrow), Game Animation Sample, Mixamo; retarget to UE5 mannequin.
+- Anim notify / notify state classes go in `Source/LoadoutSwitchCombatProto/Combat/AnimNotifies/`.
+- Asset data (ability values, notifies on montages, building montages) can be set from headless editor Python while the editor is closed: `UnrealEditor-Cmd.exe <uproject> -run=pythonscript -EnablePlugins=PythonScriptPlugin -script=<file> -unattended -nosplash -nullrhi`. Clear the read-only flag on `.uasset`s first (LFS lockable). Python can't read a montage's `notifies` directly; use `unreal.AnimationLibrary` (`get_animation_notify_events`, `add_animation_notify_state_event`, ...). Combo montages: `unreal.CombatMontageLibrary.build_combo_montage`.
+- Live editor access: Epic's experimental Unreal MCP plugin (`ModelContextProtocol` + `AllToolsets`, editor-only) serves `http://localhost:8000/mcp` while the editor is open (auto-start in `Config/DefaultEditorPerProjectUserSettings.ini`; client config in `.mcp.json`). Tools are discovered on demand: `list_toolsets`, `describe_toolset`, `call_tool`. Use it to inspect or edit the open editor and read its output log; use headless Python only when the editor is closed.
 - Editor-only tooling (component visualizers etc.) goes in the `LoadoutSwitchCombatProtoEditor` module (Type Editor, PostEngineInit), registered in its `StartupModule`. A game class it uses needs `LOADOUTSWITCHCOMBATPROTO_API` on its declaration.
 - Git + LFS. Never commit Binaries/, Intermediate/, Saved/, DerivedDataCache/.
 - Build: Development Editor | Win64. Engine is at `D:\UE_5.8`; from a shell:

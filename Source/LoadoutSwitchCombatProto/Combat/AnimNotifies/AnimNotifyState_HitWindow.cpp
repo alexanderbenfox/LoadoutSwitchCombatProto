@@ -1,4 +1,4 @@
-#include "Combat/AnimNotifyState_HitWindow.h"
+#include "Combat/AnimNotifies/AnimNotifyState_HitWindow.h"
 #include "Combat/CombatResolverComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 
@@ -8,7 +8,7 @@ void UAnimNotifyState_HitWindow::NotifyBegin(USkeletalMeshComponent* MeshComp, U
 
 	if (UCombatResolverComponent* Resolver = FindResolver(MeshComp))
 	{
-		Resolver->HandleHitWindowBegin(Animation, HitRadiusScale, Weapons);
+		Resolver->HandleHitWindowBegin(Animation, HitRadiusScale, Weapons, HitOverrides);
 	}
 }
 

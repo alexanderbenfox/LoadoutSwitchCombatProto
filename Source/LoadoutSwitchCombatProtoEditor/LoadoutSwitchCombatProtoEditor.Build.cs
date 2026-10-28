@@ -16,6 +16,7 @@ public class LoadoutSwitchCombatProtoEditor : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"AssetRegistry",
 			"LoadoutSwitchCombatProto",
 			"UnrealEd"
 		});

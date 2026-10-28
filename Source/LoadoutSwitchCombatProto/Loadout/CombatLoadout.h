@@ -28,6 +28,9 @@ public:
 
 	int32 GetAPBudget() const { return APBudget; }
 
+	/** GroundComboLength or AirComboLength */
+	int32 GetComboLength(bool bAir) const { return bAir ? AirComboLength : GroundComboLength; }
+
 protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loadout")
@@ -43,4 +46,15 @@ protected:
 	/** Which ability sits in which slot */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loadout", meta = (Categories = "Slot"))
 	TMap<FGameplayTag, TObjectPtr<UCombatAbilityDefinition>> SlotAbilities;
+
+	/**
+	 *  How many attacks a string on the ground has. The last one is the finisher: the context gets Context.Combo.Finisher for it,
+	 *  so the Finisher rule replaces whatever it would have been, and the attack after it starts a new string. 0 = no finisher, strings never end
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loadout|Combo", meta = (ClampMin = 0))
+	int32 GroundComboLength = 4;
+
+	/** The same for a string in the air */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loadout|Combo", meta = (ClampMin = 0))
+	int32 AirComboLength = 3;
 };

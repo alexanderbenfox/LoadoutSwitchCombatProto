@@ -119,9 +119,22 @@ void ACombatCharacter::OnJumped_Implementation()
 	CombatResolver->CancelAttack();
 }
 
+void ACombatCharacter::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+
+	CombatResolver->HandleLanded();
+}
+
 void ACombatCharacter::Move(const FInputActionValue& Value)
 {
 	const FVector2D MovementVector = Value.Get<FVector2D>();
+
+	// moving out of an attack's recovery stops it
+	if (!MovementVector.IsNearlyZero())
+	{
+		CombatResolver->HandleMovementInput();
+	}
 
 	if (GetController() != nullptr)
 	{

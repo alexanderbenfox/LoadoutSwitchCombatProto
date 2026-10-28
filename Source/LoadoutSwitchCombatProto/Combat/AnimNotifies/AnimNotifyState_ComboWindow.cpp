@@ -1,4 +1,4 @@
-#include "Combat/AnimNotifyState_ComboWindow.h"
+#include "Combat/AnimNotifies/AnimNotifyState_ComboWindow.h"
 #include "Combat/CombatResolverComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 

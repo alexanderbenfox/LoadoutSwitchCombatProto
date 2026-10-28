@@ -1,4 +1,4 @@
-#include "Combat/AnimNotifyState_CombatLunge.h"
+#include "Combat/AnimNotifies/AnimNotifyState_CombatLunge.h"
 #include "Combat/CombatResolverComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 

@@ -235,6 +235,7 @@ Fast, fragile, owns the air. No launcher and weak against groups on the ground.
 | Post-dodge | Backstab | 2 | Step behind the target, guard-piercing hit |
 | Finisher (air) | Pinwheel Spike | 3 | Multi-hit spin, then slams the target down |
 | Combo shaper | Flurry (x2) | 2 | Two extra hits in air strings |
+| Cancel | Hit Cancel | 3 | Attacks that connect cancel into the next one (see Cancel abilities) |
 
 ### Longshot (bow, ranged class)
 
@@ -293,6 +294,23 @@ The whole combat vocabulary is six buttons, and only three of them are used insi
 - **Cancel windows are authored per move** as notify windows on the animation: when the next attack can chain, when a dodge can cancel, when a swap can cancel. Dodge windows open earliest, then swap, then attack.
 - **Context is sampled when the buffered input fires,** not when it was pressed. The player's position at the moment the move starts is what counts.
 - **Alternate attack outside a combo** is unassigned for now. Candidates: a held charge version of the current slot, or a second independent context table. Leave it empty until the single table is proven.
+
+### Cancel abilities
+
+The baseline has no hit-confirm cancels. Every attack plays out until its action is over (the swing finished, before the hold and return to stance), and from that point any input cuts the recovery: attack, jump or movement. Hit or whiff makes no difference, so the baseline has to feel fluid by itself before anything is layered on.
+
+Cancelling earlier than that is **bought**, as loadout abilities in tiers. Each tier extends the one before it, the way KH II's Finishing Plus extends finishers:
+
+| Tier | Ability | AP | Effect | Reference |
+| --- | --- | --- | --- | --- |
+| 1 | Finishing Plus | 3 | A finisher that connects chains straight into a second finisher instead of ending the string. Stackable for a third. | KH II Finishing Plus: "may cancel the final portion of the attack with the next finisher" |
+| 2 | Hit Cancel | 3 | Any attack that connects can be cancelled into the next attack a few frames after impact. Whiffs still play out their recovery. Fang's signature (dual class). | Fighting-game special cancels; DMC jump cancel off a hit |
+| 3 | Dodge Offset | 4 | Dodge out of any attack, hit or whiff, and keep the combo position by holding attack through the dodge. Requires Hit Cancel. | Bayonetta Dodge Offset |
+
+- **Hit Cancel uses the same "connected" gate as the swap cancel** (Style switching, rule 1), so the two read the same way to the player.
+- **Cancels open after the impact, not on it,** so the hit still lands visibly before the next move starts.
+- **The resolver picks what the cancel goes into.** After a ground finisher launches the target, a cancelled attack press resolves to the Riser, because the target is airborne.
+- **Open:** whether Dodge Offset should also keep the string through a swap during the dodge, or whether that is too strong with combo carry-over.
 
 ## Enemy and encounter implications
 

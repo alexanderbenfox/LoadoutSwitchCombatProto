@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimNotifies/AnimNotifyState.h"
+#include "Combat/CombatHitSettings.h"
 #include "AnimNotifyState_HitWindow.generated.h"
 
 /**
@@ -27,6 +28,10 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Hit Window")
 	TArray<FName> Weapons;
+
+	/** This hit's changes to the ability's Hit settings, e.g. a bigger knockback on a combo finisher. Unticked values use the ability's */
+	UPROPERTY(EditAnywhere, Category = "Hit Window", meta = (ShowOnlyInnerProperties))
+	FCombatHitSettingsOverride HitOverrides;
 
 	virtual void NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference) override;
 
