@@ -33,3 +33,7 @@ Content/ParagonKwang/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Local-only setup: Claude Code's Unreal MCP connection and per-user editor settings
+.mcp.json
+Config/DefaultEditorPerProjectUserSettings.ini
