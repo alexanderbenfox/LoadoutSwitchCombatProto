@@ -4,6 +4,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Combat/CombatContextComponent.h"
 #include "Combat/CombatResolverComponent.h"
+#include "Combat/CombatTargetingComponent.h"
 #include "Combat/CombatWeaponComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/LocalPlayer.h"
@@ -14,7 +15,6 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Input/CombatInputUserSettings.h"
 #include "InputActionValue.h"
-#include "Kismet/GameplayStatics.h"
 #include "Loadout/CombatLoadoutComponent.h"
 #include "LoadoutSwitchCombatProto.h"
 #include "MotionWarpingComponent.h"
@@ -53,6 +53,7 @@ ACombatCharacter::ACombatCharacter()
 	CombatContext = CreateDefaultSubobject<UCombatContextComponent>(TEXT("CombatContext"));
 	CombatLoadout = CreateDefaultSubobject<UCombatLoadoutComponent>(TEXT("CombatLoadout"));
 	CombatResolver = CreateDefaultSubobject<UCombatResolverComponent>(TEXT("CombatResolver"));
+	Targeting = CreateDefaultSubobject<UCombatTargetingComponent>(TEXT("Targeting"));
 
 	Weapon = CreateDefaultSubobject<UCombatWeaponComponent>(TEXT("Weapon"));
 	Weapon->SetupAttachment(GetMesh(), TEXT("weapon_r_socket"));
@@ -62,7 +63,6 @@ void ACombatCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	UpdateSoftTarget();
 	UpdateFollowCamera(DeltaSeconds);
 }
 
@@ -113,9 +113,11 @@ void ACombatCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACombatCharacter::Move);
 
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::StickLook);
+		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Completed, this, &ACombatCharacter::StickLookReleased);
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::MouseLook);
 
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACombatCharacter::Attack);
+		EnhancedInputComponent->BindAction(LockOnAction, ETriggerEvent::Started, this, &ACombatCharacter::ToggleLockOn);
 	}
 	else
 	{
@@ -167,6 +169,14 @@ void ACombatCharacter::Move(const FInputActionValue& Value)
 void ACombatCharacter::StickLook(const FInputActionValue& Value)
 {
 	const FVector2D Stick = Value.Get<FVector2D>();
+
+	Targeting->HandleStickInput(Stick);
+	if (Targeting->IsLocked())
+	{
+		return;
+	}
+	Targeting->NotifyManualLook();
+
 	const UCombatInputUserSettings* Settings = UCombatInputUserSettings::Get(Cast<APlayerController>(GetController()));
 	const float Sensitivity = Settings ? Settings->StickLookSensitivity : 1.0f;
 	const float InvertY = Settings && Settings->bInvertStickY ? -1.0f : 1.0f;
@@ -180,9 +190,22 @@ void ACombatCharacter::StickLook(const FInputActionValue& Value)
 	}
 }
 
+void ACombatCharacter::StickLookReleased(const FInputActionValue& Value)
+{
+	Targeting->HandleStickInput(FVector2D::ZeroVector);
+}
+
 void ACombatCharacter::MouseLook(const FInputActionValue& Value)
 {
 	const FVector2D Mouse = Value.Get<FVector2D>();
+
+	if (Targeting->IsLocked())
+	{
+		Targeting->HandleMouseInput(Mouse);
+		return;
+	}
+	Targeting->NotifyManualLook();
+
 	const UCombatInputUserSettings* Settings = UCombatInputUserSettings::Get(Cast<APlayerController>(GetController()));
 	const float Sensitivity = Settings ? Settings->MouseLookSensitivity : 1.0f;
 	const float InvertY = Settings && Settings->bInvertMouseY ? -1.0f : 1.0f;
@@ -198,7 +221,7 @@ void ACombatCharacter::MouseLook(const FInputActionValue& Value)
 void ACombatCharacter::UpdateFollowCamera(float DeltaSeconds)
 {
 	APlayerController* PlayerController = Cast<APlayerController>(GetController());
-	if (!PlayerController || FollowRate <= 0.0f)
+	if (!PlayerController || FollowRate <= 0.0f || Targeting->IsDrivingCamera())
 	{
 		return;
 	}
@@ -245,58 +268,7 @@ void ACombatCharacter::Attack()
 	CombatResolver->HandleAttackPressed();
 }
 
-void ACombatCharacter::UpdateSoftTarget()
+void ACombatCharacter::ToggleLockOn()
 {
-	TArray<AActor*> Enemies;
-	UGameplayStatics::GetAllActorsWithTag(this, TEXT("Enemy"), Enemies);
-
-	// where the camera looks, flattened: an enemy above or below the view line isn't "off to the side"
-	const FRotator ViewRotation = Controller ? Controller->GetControlRotation() : GetActorRotation();
-	const FVector ViewForward = FRotator(0.0, ViewRotation.Yaw, 0.0).Vector();
-
-	const float Unreachable = TNumericLimits<float>::Max();
-	AActor* CurrentTarget = CombatContext->GetTarget();
-	float CurrentScore = Unreachable;
-	AActor* BestTarget = nullptr;
-	float BestScore = Unreachable;
-
-	for (AActor* Enemy : Enemies)
-	{
-		const float Score = ScoreTargetCandidate(Enemy, ViewForward);
-		if (Enemy == CurrentTarget)
-		{
-			CurrentScore = Score;
-		}
-		if (Score < BestScore)
-		{
-			BestScore = Score;
-			BestTarget = Enemy;
-		}
-	}
-
-	// keep the current target unless the best one is clearly better; a destroyed or out-of-range target scores Unreachable and always loses
-	if (CurrentScore < Unreachable && BestScore > CurrentScore - TargetSwitchMargin)
-	{
-		BestTarget = CurrentTarget;
-	}
-
-	CombatContext->SetTarget(BestTarget);
-}
-
-float ACombatCharacter::ScoreTargetCandidate(const AActor* Candidate, const FVector& ViewForward) const
-{
-	// horizontal, like the context component's range bands
-	const FVector ToCandidate = Candidate->GetActorLocation() - GetActorLocation();
-	const float Distance = ToCandidate.Size2D();
-	if (Distance > TargetMaxDistance)
-	{
-		return TNumericLimits<float>::Max();
-	}
-
-	// 0 straight ahead, 0.5 square to the side, 1 directly behind; an enemy on top of the player counts as ahead
-	const float AngleCost = Distance > KINDA_SMALL_NUMBER
-		? (1.0f - FVector::DotProduct(ToCandidate.GetSafeNormal2D(), ViewForward)) * 0.5f
-		: 0.0f;
-
-	return Distance / TargetMaxDistance + TargetAngleWeight * AngleCost;
+	Targeting->ToggleLock();
 }

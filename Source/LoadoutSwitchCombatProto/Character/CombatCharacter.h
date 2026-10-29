@@ -10,6 +10,7 @@ class UCameraComponent;
 class UCombatContextComponent;
 class UCombatLoadoutComponent;
 class UCombatResolverComponent;
+class UCombatTargetingComponent;
 class UInputAction;
 class UInputMappingContext;
 class UMotionWarpingComponent;
@@ -54,6 +55,10 @@ class ACombatCharacter : public ACharacter, public IAbilitySystemInterface
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCombatResolverComponent> CombatResolver;
 
+	/** Soft targeting and hard lock: picks the target for the context component and frames it with the camera when locked */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCombatTargetingComponent> Targeting;
+
 	/**
 	 *  The weapon in the character's hand; its hit segment is set on the component.
 	 *  Attached to weapon_r_socket (on hand_r); change Parent Socket on the component in the Blueprint if the socket is renamed.
@@ -81,6 +86,10 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> AttackAction;
+
+	/** Toggles hard lock (R3); while locked, the camera stick switches target instead of turning the camera */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<UInputAction> LockOnAction;
 
 	/** How fast a full right-stick push turns the camera sideways, before the player's stick sensitivity */
 	UPROPERTY(EditAnywhere, Category = "Input|Look", meta = (ClampMin = 0, Units = "DegreesPerSecond"))
@@ -110,18 +119,18 @@ protected:
 	 *  How long after the last manual camera input (stick or mouse) before it starts; manual input always wins
 	 */
 	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, Units = "s"))
-	float FollowDelay = 1.0f;
+	float FollowDelay = 0.5f;
 
 	/** How long the follow takes to build up to full strength once it starts, so it eases in instead of kicking in */
 	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, Units = "s"))
-	float FollowRampTime = 0.6f;
+	float FollowRampTime = 0.3f;
 
 	/**
 	 *  How fast the camera turns at full stick moving straight across the screen. It scales with how sideways the movement is,
 	 *  so running away from the camera holds it still, and with how far the stick is pushed. 0 = no follow
 	 */
 	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, Units = "DegreesPerSecond"))
-	float FollowRate = 70.0f;
+	float FollowRate = 90.0f;
 
 	/**
 	 *  Strength of the follow while moving back towards the camera, as a fraction of the normal follow. Low keeps the camera
@@ -129,22 +138,6 @@ protected:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, ClampMax = 1))
 	float FollowTowardsCameraScale = 0.2f;
-
-	/** Enemies further away than this are never picked. Also scales the distance part of a candidate's score */
-	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 1, Units = "cm"))
-	float TargetMaxDistance = 2000.0f;
-
-	/**
-	 *  How much being off to the side of the camera's view counts against a candidate, compared with distance.
-	 *  0 picks the nearest enemy wherever it is; higher favours whatever the camera is pointing at.
-	 *  At 1, an enemy directly behind costs as much as one at TargetMaxDistance straight ahead.
-	 */
-	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 0))
-	float TargetAngleWeight = 1.0f;
-
-	/** A candidate has to beat the current target's score by this much to take over, so the target doesn't flicker between two similar enemies */
-	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 0))
-	float TargetSwitchMargin = 0.1f;
 
 public:
 
@@ -171,13 +164,17 @@ protected:
 
 	void Move(const FInputActionValue& Value);
 
-	/** Right stick: turns at the stick rates, so the camera speed doesn't depend on the frame rate */
+	/** Right stick: turns at the stick rates, so the camera speed doesn't depend on the frame rate. While locked, it's for switching target */
 	void StickLook(const FInputActionValue& Value);
 
-	/** Mouse: turns by however far the mouse moved */
+	/** Right stick back in its dead zone; the lock's flick detection needs to see it return to rest */
+	void StickLookReleased(const FInputActionValue& Value);
+
+	/** Mouse: turns by however far the mouse moved. While locked, a quick swipe switches target */
 	void MouseLook(const FInputActionValue& Value);
 
 	void Attack();
+	void ToggleLockOn();
 
 private:
 
@@ -186,13 +183,4 @@ private:
 
 	/** World time of the last stick or mouse camera input; the follow camera waits FollowDelay after it */
 	double LastManualLookTime = -1.0e9;
-
-	/**
-	 *  Soft targeting, until the Targeting component and hard lock exist: of the actors carrying the "Enemy" actor tag,
-	 *  targets the one with the lowest score, preferring to keep the current target.
-	 */
-	void UpdateSoftTarget();
-
-	/** Lower is better: distance as a fraction of TargetMaxDistance plus the weighted angle off ViewForward. Max float if out of range */
-	float ScoreTargetCandidate(const AActor* Candidate, const FVector& ViewForward) const;
 };
