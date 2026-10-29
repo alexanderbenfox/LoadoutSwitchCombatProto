@@ -37,6 +37,10 @@ public:
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadWrite, Category = "Look")
 	bool bInvertMouseY = false;
 
+	/** The camera leans towards where the player is moving when they aren't steering it. Off, it only moves when they move it */
+	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadWrite, Category = "Look")
+	bool bCameraFollow = true;
+
 protected:
 
 	/** Gamepad keys belong to the gamepad, every other key to keyboard and mouse; each device gets its own key slots */

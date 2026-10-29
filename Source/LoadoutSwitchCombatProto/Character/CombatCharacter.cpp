@@ -1,6 +1,7 @@
 #include "Character/CombatCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Combat/CombatContextComponent.h"
 #include "Combat/CombatResolverComponent.h"
 #include "Combat/CombatWeaponComponent.h"
@@ -62,6 +63,7 @@ void ACombatCharacter::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateSoftTarget();
+	UpdateFollowCamera(DeltaSeconds);
 }
 
 void ACombatCharacter::PossessedBy(AController* NewController)
@@ -78,6 +80,13 @@ void ACombatCharacter::NotifyControllerChanged()
 
 	if (const APlayerController* PlayerController = Cast<APlayerController>(GetController()))
 	{
+		// the camera manager clamps the view pitch every frame, whatever turned it
+		if (APlayerCameraManager* CameraManager = PlayerController->PlayerCameraManager)
+		{
+			CameraManager->ViewPitchMin = CameraPitchMin;
+			CameraManager->ViewPitchMax = CameraPitchMax;
+		}
+
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
 		{
 			UEnhancedInputUserSettings* UserSettings = Subsystem->GetUserSettings();
@@ -162,6 +171,7 @@ void ACombatCharacter::StickLook(const FInputActionValue& Value)
 	const float Sensitivity = Settings ? Settings->StickLookSensitivity : 1.0f;
 	const float InvertY = Settings && Settings->bInvertStickY ? -1.0f : 1.0f;
 	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
+	LastManualLookTime = GetWorld()->GetTimeSeconds();
 
 	if (GetController() != nullptr)
 	{
@@ -176,12 +186,58 @@ void ACombatCharacter::MouseLook(const FInputActionValue& Value)
 	const UCombatInputUserSettings* Settings = UCombatInputUserSettings::Get(Cast<APlayerController>(GetController()));
 	const float Sensitivity = Settings ? Settings->MouseLookSensitivity : 1.0f;
 	const float InvertY = Settings && Settings->bInvertMouseY ? -1.0f : 1.0f;
+	LastManualLookTime = GetWorld()->GetTimeSeconds();
 
 	if (GetController() != nullptr)
 	{
 		AddControllerYawInput(Mouse.X * MouseLookScale * Sensitivity);
 		AddControllerPitchInput(Mouse.Y * MouseLookScale * Sensitivity * InvertY);
 	}
+}
+
+void ACombatCharacter::UpdateFollowCamera(float DeltaSeconds)
+{
+	APlayerController* PlayerController = Cast<APlayerController>(GetController());
+	if (!PlayerController || FollowRate <= 0.0f)
+	{
+		return;
+	}
+
+	const UCombatInputUserSettings* Settings = UCombatInputUserSettings::Get(PlayerController);
+	if (Settings && !Settings->bCameraFollow)
+	{
+		return;
+	}
+
+	// the player steering the camera always wins; the follow only comes back after they've let go for a moment
+	const double SinceManualLook = GetWorld()->GetTimeSeconds() - LastManualLookTime;
+	if (SinceManualLook < FollowDelay)
+	{
+		return;
+	}
+
+	// driven by the movement stick (the acceleration it asks for), not velocity, so lunges and knockback don't swing the camera
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const FVector Acceleration = Movement->GetCurrentAcceleration();
+	const float StickAmount = Movement->GetMaxAcceleration() > 0.0f ? FMath::Clamp(Acceleration.Size2D() / Movement->GetMaxAcceleration(), 0.0f, 1.0f) : 0.0f;
+	if (StickAmount <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	// how far round the movement is from where the camera points: positive is to the right
+	const float CameraYaw = PlayerController->GetControlRotation().Yaw;
+	const float OffAngle = FMath::FindDeltaAngleDegrees(CameraYaw, Acceleration.Rotation().Yaw);
+
+	// sideways movement turns the camera most; straight away from it, not at all
+	float Sideways = FMath::Sin(FMath::DegreesToRadians(OffAngle));
+	if (FMath::Abs(OffAngle) > 90.0f)
+	{
+		Sideways *= FollowTowardsCameraScale;
+	}
+
+	const float Ramp = FollowRampTime > 0.0f ? FMath::Clamp(static_cast<float>(SinceManualLook - FollowDelay) / FollowRampTime, 0.0f, 1.0f) : 1.0f;
+	AddControllerYawInput(Sideways * FollowRate * StickAmount * Ramp * DeltaSeconds);
 }
 
 void ACombatCharacter::Attack()

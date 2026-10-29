@@ -162,6 +162,11 @@ Until there's a menu, use the console in PIE:
 - `Combat.Input.Reset [Mapping]`: one mapping, or all of them, back to the profile's defaults.
 - `Combat.Input.Profile <ShoulderAttack|Default>`: switches preset.
 - `Combat.Input.Look <stick|mouse> <Sensitivity> [InvertY 0|1]`, e.g. `Combat.Input.Look stick 1.4 1`.
+- `Combat.Input.CameraFollow [0|1]`: the follow camera off or on (no argument toggles).
+
+**Pitch limits:** the camera tilts between **Camera Pitch Min** (−60°, looking down from above) and **Camera Pitch Max** (30°, looking up from below), on the character under Camera|Limits. They're applied to the player's camera manager on possession, so they cap the stick, the mouse and anything else that turns the camera; a change made during PIE takes effect on the next possession.
+
+**Follow camera** (between Kingdom Hearts and Dark Souls): when the player hasn't touched the camera for **Follow Delay** (1 s), it leans towards where they're moving, easing in over **Follow Ramp Time** (0.6 s). It turns at up to **Follow Rate** (70°/s), scaled by how sideways the movement is and how far the stick is pushed: strafing across the screen turns it most, running away from it not at all, and running back towards it only at **Follow Towards Camera Scale** (0.2) so it doesn't swing round. It reads the movement stick, not velocity, so lunges and knockback don't move it. Any stick or mouse camera input takes over at once and restarts the delay. There's no automatic pitch. The settings are on the character under Camera|Follow; players can turn it off (`bCameraFollow` in their input settings). Lock-on will take over the camera once it exists.
 
 **Camera speed:** the right stick turns at **Stick Yaw Rate** / **Stick Pitch Rate** (200 / 130 degrees per second at full tilt, on the character under Input|Look) times the player's stick sensitivity, so it doesn't change with the frame rate. The mouse turns **Mouse Look Scale** (2.5) degrees per unit of movement times the mouse sensitivity. The engine's legacy input scales are off (`bEnableLegacyInputScales=False` in `DefaultInput.ini`); they used to multiply look input by 2.5 and flip the stick's pitch.
 

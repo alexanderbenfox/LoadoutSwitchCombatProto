@@ -94,6 +94,42 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input|Look", meta = (ClampMin = 0, Units = "Degrees"))
 	float MouseLookScale = 2.5f;
 
+	/**
+	 *  Furthest the camera can tilt down to look at the character from above (negative pitch). Applied to the player's
+	 *  camera manager when the character is possessed, so it limits the stick, the mouse and anything else that turns the camera
+	 */
+	UPROPERTY(EditAnywhere, Category = "Camera|Limits", meta = (ClampMin = -89, ClampMax = 0, Units = "Degrees"))
+	float CameraPitchMin = -60.0f;
+
+	/** Furthest the camera can tilt up to look from below (positive pitch); low keeps it from dropping under the floor */
+	UPROPERTY(EditAnywhere, Category = "Camera|Limits", meta = (ClampMin = 0, ClampMax = 89, Units = "Degrees"))
+	float CameraPitchMax = 30.0f;
+
+	/**
+	 *  Follow camera: while the player moves without touching the camera, it leans towards where they're going.
+	 *  How long after the last manual camera input (stick or mouse) before it starts; manual input always wins
+	 */
+	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, Units = "s"))
+	float FollowDelay = 1.0f;
+
+	/** How long the follow takes to build up to full strength once it starts, so it eases in instead of kicking in */
+	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, Units = "s"))
+	float FollowRampTime = 0.6f;
+
+	/**
+	 *  How fast the camera turns at full stick moving straight across the screen. It scales with how sideways the movement is,
+	 *  so running away from the camera holds it still, and with how far the stick is pushed. 0 = no follow
+	 */
+	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, Units = "DegreesPerSecond"))
+	float FollowRate = 70.0f;
+
+	/**
+	 *  Strength of the follow while moving back towards the camera, as a fraction of the normal follow. Low keeps the camera
+	 *  from swinging round when the player turns to run at it (the Dark Souls way); 1 treats it like any other direction
+	 */
+	UPROPERTY(EditAnywhere, Category = "Camera|Follow", meta = (ClampMin = 0, ClampMax = 1))
+	float FollowTowardsCameraScale = 0.2f;
+
 	/** Enemies further away than this are never picked. Also scales the distance part of a candidate's score */
 	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 1, Units = "cm"))
 	float TargetMaxDistance = 2000.0f;
@@ -144,6 +180,12 @@ protected:
 	void Attack();
 
 private:
+
+	/** Turns the camera towards the movement direction when the player isn't steering it (see Camera|Follow) */
+	void UpdateFollowCamera(float DeltaSeconds);
+
+	/** World time of the last stick or mouse camera input; the follow camera waits FollowDelay after it */
+	double LastManualLookTime = -1.0e9;
 
 	/**
 	 *  Soft targeting, until the Targeting component and hard lock exist: of the actors carrying the "Enemy" actor tag,

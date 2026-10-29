@@ -70,8 +70,8 @@ namespace
 			Keys.Sort();
 			UE_LOG(LogCombatProto, Display, TEXT("  %-14s %s"), *MappingName.ToString(), *FString::Join(Keys, TEXT("   ")));
 		}
-		UE_LOG(LogCombatProto, Display, TEXT("Look: stick x%.2f%s, mouse x%.2f%s"), Settings->StickLookSensitivity, Settings->bInvertStickY ? TEXT(" inverted") : TEXT(""),
-			Settings->MouseLookSensitivity, Settings->bInvertMouseY ? TEXT(" inverted") : TEXT(""));
+		UE_LOG(LogCombatProto, Display, TEXT("Look: stick x%.2f%s, mouse x%.2f%s, follow camera %s"), Settings->StickLookSensitivity, Settings->bInvertStickY ? TEXT(" inverted") : TEXT(""),
+			Settings->MouseLookSensitivity, Settings->bInvertMouseY ? TEXT(" inverted") : TEXT(""), Settings->bCameraFollow ? TEXT("on") : TEXT("off"));
 	}
 
 	void RebindKey(const TArray<FString>& Args, UWorld* World)
@@ -193,6 +193,22 @@ namespace
 		ApplyAndSave(Settings);
 		UE_LOG(LogCombatProto, Display, TEXT("Combat.Input: %s look x%.2f%s"), *Args[0], Sensitivity, bInvert ? TEXT(" inverted") : TEXT(""));
 	}
+
+	void SetCameraFollow(const TArray<FString>& Args, UWorld* World)
+	{
+		UCombatInputUserSettings* Settings = GetSettingsForCommand(World);
+		if (!Settings)
+		{
+			return;
+		}
+		Settings->bCameraFollow = Args.IsEmpty() ? !Settings->bCameraFollow : FCString::ToBool(*Args[0]);
+		ApplyAndSave(Settings);
+		UE_LOG(LogCombatProto, Display, TEXT("Combat.Input: follow camera %s"), Settings->bCameraFollow ? TEXT("on") : TEXT("off"));
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs FollowCommand(TEXT("Combat.Input.CameraFollow"),
+		TEXT("Combat.Input.CameraFollow [0|1]: turns the follow camera off or on (no argument toggles). Saved"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetCameraFollow));
 
 	FAutoConsoleCommandWithWorldAndArgs ListCommand(TEXT("Combat.Input.List"),
 		TEXT("Lists every rebindable action with its keyboard/mouse and pad keys, the active profile and the look settings"),
