@@ -75,19 +75,21 @@ public:
 
 	// when the rise happens and how long it takes come from a Combat Rise notify window on the montage
 
-	/**
-	 *  Hang time for attacks used in the air: while this one plays, the character's gravity is multiplied by this, and each of
-	 *  its attacks (each combo hit) starts by stopping the fall, so an air combo stays up. 1 = no hang, falls as normal
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Air", meta = (ClampMin = 0, ClampMax = 1))
-	float AirHangGravityScale = 1.0f;
+	// how an attack hangs or glides in the air comes from Combat Stall and Combat Glide notify windows on the montage;
+	// a Glide stops Lunge Stop Distance short of the target
 
 	/**
-	 *  How long into the attack the hang lasts, after which the character falls as normal for the rest of it, e.g. dropping out of
-	 *  an air finisher's long recovery. 0 = the whole attack
+	 *  A montage section that replaces the first one when a string starts with the target at least Rising Opener Min Height
+	 *  above the character, e.g. a rising slash instead of the usual downward opener of an air combo (KH). It chains into the
+	 *  second section the way the first does, and the sections before it never chain into it, so put it after them.
+	 *  None = always the first section
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Air", meta = (ClampMin = 0, Units = "s"))
-	float AirHangTime = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Combo")
+	FName RisingOpenerSection;
+
+	/** How far above the character (origin to origin) the target has to be for the Rising Opener Section; level or below gets the usual opener */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Combo", meta = (ClampMin = 0, Units = "cm"))
+	float RisingOpenerMinHeight = 60.0f;
 
 	/** What each of this ability's hits does to its target. A Hit Window can override any of these for its own hit */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Hit", meta = (ShowOnlyInnerProperties))

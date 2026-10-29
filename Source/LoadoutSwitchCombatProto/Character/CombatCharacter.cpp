@@ -32,7 +32,9 @@ ACombatCharacter::ACombatCharacter()
 
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
-	GetCharacterMovement()->JumpZVelocity = 500.f;
+	// heavier than Unreal's default, with a faster jump to keep its height: about 1.4 m, up and down in about 0.7 s (with the fall gravity)
+	GetCharacterMovement()->GravityScale = 2.0f;
+	GetCharacterMovement()->JumpZVelocity = 750.f;
 	GetCharacterMovement()->AirControl = 0.35f;
 	GetCharacterMovement()->MaxWalkSpeed = 500.f;
 	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
@@ -59,10 +61,18 @@ ACombatCharacter::ACombatCharacter()
 	Weapon->SetupAttachment(GetMesh(), TEXT("weapon_r_socket"));
 }
 
+void ACombatCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	BaseGravityScale = GetCharacterMovement()->GravityScale;
+}
+
 void ACombatCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	UpdateGravity();
 	UpdateFollowCamera(DeltaSeconds);
 }
 
@@ -216,6 +226,17 @@ void ACombatCharacter::MouseLook(const FInputActionValue& Value)
 		AddControllerYawInput(Mouse.X * MouseLookScale * Sensitivity);
 		AddControllerPitchInput(Mouse.Y * MouseLookScale * Sensitivity * InvertY);
 	}
+}
+
+void ACombatCharacter::UpdateGravity()
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const float AttackGravityScale = CombatResolver->GetAttackGravityScale();
+
+	// an attack's Stall or Glide sets its own gravity; the extra fall gravity is for plain jumps and drops
+	const bool bAttackHolding = AttackGravityScale < 1.0f;
+	const bool bGoingDown = Movement->IsFalling() && Movement->Velocity.Z < 0.0;
+	Movement->GravityScale = BaseGravityScale * (bGoingDown && !bAttackHolding ? FallGravityMultiplier : 1.0f) * AttackGravityScale;
 }
 
 void ACombatCharacter::UpdateFollowCamera(float DeltaSeconds)

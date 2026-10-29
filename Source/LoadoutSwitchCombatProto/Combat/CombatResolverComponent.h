@@ -6,6 +6,7 @@
 #include "Combat/CombatHitSettings.h"
 #include "CombatResolverComponent.generated.h"
 
+class UAnimNotifyState;
 class UAnimSequenceBase;
 class UCombatAbilityDefinition;
 class UCombatContextComponent;
@@ -75,6 +76,18 @@ public:
 	/** Called by a Combat Lunge notify window on the playing montage; lunges for the ability that montage belongs to */
 	void HandleLungeWindowBegin(float Duration);
 
+	/** Called by a Combat Stall window opening on Animation: in the air, stops the rise (and with bStopFall the fall) and hangs on GravityScale until Window closes */
+	void HandleStallBegin(const UAnimSequenceBase* Animation, const UAnimNotifyState* Window, float GravityScale, bool bStopFall);
+
+	/**
+	 *  Called by a Combat Glide window opening on Animation: in the air, steers the owner towards the target with a spring (MaxSpeed,
+	 *  Stiffness) on GravityScale until Window closes, stopping the fall first with bStopFall. With no target, stalls instead
+	 */
+	void HandleGlideBegin(const UAnimSequenceBase* Animation, const UAnimNotifyState* Window, float GravityScale, bool bStopFall, float MaxSpeed, float Stiffness);
+
+	/** Called by a Combat Stall or Glide window closing; ends it if it's the one in effect */
+	void HandleAirMotionEnd(const UAnimNotifyState* Window);
+
 	/** Called by a Combat Rise notify window on Animation; rises for the ability that montage belongs to, over Duration seconds */
 	void HandleRiseWindowBegin(const UAnimSequenceBase* Animation, float Duration);
 
@@ -89,6 +102,9 @@ public:
 
 	/** True in the recovery of the attack playing: after its Combo Window closed, or inside its Recovery window */
 	bool IsInRecovery() const { return bAbilityActive && (bCanChain || bRecoveryOpen); }
+
+	/** What the attack playing wants the owner's gravity multiplied by right now (an open Stall or Glide window); 1 when it doesn't. The character applies it */
+	float GetAttackGravityScale() const { return AttackGravityScale; }
 
 	/** Called by the character on movement input. Stops an attack in recovery, once it's been in it Movement Cancel Delay, unless a press is waiting to chain */
 	void HandleMovementInput();
@@ -203,11 +219,14 @@ private:
 	/** Hits Victim with ActiveHitSettings, unless this window already hit it */
 	void ApplyHit(AActor* Victim, const FHitResult& Hit);
 
-	/**
-	 *  Applies the active ability's Air Hang Gravity Scale while it plays in the air, and puts gravity back when it ends or the
-	 *  character lands. bAttackStarted: an attack (or combo hit) started this frame, which stops the fall if hanging
-	 */
-	void UpdateAirHang(bool bAttackStarted);
+	/** Each tick: steers an open Glide, and ends a Stall or Glide once the attack is over or the owner isn't in the air */
+	void UpdateAirMotion(float DeltaTime);
+
+	/** Ends the Stall or Glide in effect, if any, and gives the owner back its air control and air braking */
+	void EndAirMotion();
+
+	/** The section a fresh (not chained) attack of Ability starts in: its Rising Opener Section with the target high enough above, else none (the first) */
+	FName GetOpenerSection(const UCombatAbilityDefinition* Ability) const;
 
 	/** Draws the reticle on Target for the predicted ability; Ability can be null */
 	void DrawReticle(const AActor* Target, const UCombatAbilityDefinition* Ability) const;
@@ -266,16 +285,27 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<AActor>> HitActors;
 
-	/** True while UpdateAirHang has the owner's gravity lowered */
-	bool bAirHanging = false;
+	enum class EAirMotion : uint8 { None, Stall, Glide };
 
-	/** The owner's gravity scale at BeginPlay, which the hang returns to */
-	float DefaultGravityScale = 1.0f;
+	/** The Stall or Glide window in effect, and which one it is; a window closing only ends the motion if it's this one */
+	EAirMotion AirMotion = EAirMotion::None;
+	TWeakObjectPtr<const UAnimNotifyState> AirMotionWindow;
+
+	/** The open Glide's settings */
+	float GlideMaxSpeed = 0.0f;
+	float GlideStiffness = 1.0f;
+
+	/** The owner's air control and air braking, put aside while a Glide steers it (they'd fight the spring) */
+	float SavedAirControl = 0.0f;
+	float SavedBrakingDecelerationFalling = 0.0f;
+
+	/** See GetAttackGravityScale */
+	float AttackGravityScale = 1.0f;
 
 	/** True once the current attack has hit something; reset when the next attack starts */
 	bool bAttackConnected = false;
 
-	/** World time the current attack started, for the ability's Air Hang Time */
+	/** World time the current attack started */
 	double AttackStartTime = 0.0;
 
 	/**

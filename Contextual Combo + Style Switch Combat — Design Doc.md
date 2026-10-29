@@ -312,6 +312,13 @@ Cancelling earlier than that is **bought**, as loadout abilities in tiers. Each 
 - **The resolver picks what the cancel goes into.** After a ground finisher launches the target, a cancelled attack press resolves to the Riser, because the target is airborne.
 - **Open:** whether Dodge Offset should also keep the string through a swap during the dodge, or whether that is too strong with combo carry-over.
 
+### Multi-hit combo abilities
+
+KH's later combo abilities (Aerial Sweep, Aerial Spiral and similar) are one montage that strikes several times, often spinning. They are **combo parts, not new slots**: a loadout slots them as the finisher or as the main Air Close combo, and they replace that part of the string.
+
+- **Weapon-hitbox multi-hits need nothing new.** Each strike is its own Hit Window on the montage, with its own hit settings; the weapon's hit segment is the only hitbox, so no rotate-in-place or orbit movement is required.
+- **Projectile finishers need a spawned-hitbox system.** Sora has a finisher that summons three balls orbiting him, which hit enemies they touch. That needs hitboxes that live apart from the weapon (spawned, moving on their own path, with their own hit settings and lifetime). Not built yet; design it when the first such ability is wanted.
+
 ## Enemy and encounter implications
 
 Swapping only matters if enemies make one range, height or tempo temporarily wrong. Each enemy type below exists to close one context and open another, and the prototype needs only the first two to test the idea.

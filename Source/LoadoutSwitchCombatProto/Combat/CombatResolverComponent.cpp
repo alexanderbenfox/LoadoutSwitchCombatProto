@@ -1,5 +1,6 @@
 #include "Combat/CombatResolverComponent.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Combat/CombatContextComponent.h"
 #include "Combat/CombatHitStopSubsystem.h"
 #include "Combat/CombatResolverRules.h"
@@ -63,9 +64,10 @@ void UCombatResolverComponent::BeginPlay()
 	LoadoutComponent = GetOwner()->FindComponentByClass<UCombatLoadoutComponent>();
 	GetOwner()->GetComponents<UCombatWeaponComponent>(WeaponComponents);
 
+	// a Glide sets the owner's speed here; the movement component has to move with it the same frame, not before
 	if (const ACharacter* Char = Cast<ACharacter>(GetOwner()))
 	{
-		DefaultGravityScale = Char->GetCharacterMovement()->GravityScale;
+		Char->GetCharacterMovement()->PrimaryComponentTick.AddPrerequisite(this, PrimaryComponentTick);
 	}
 
 	// 1 - (1 - t)^2 as a cubic key pair: slope 2 at the start, 0 at the top, so the rise hands over to gravity with no jolt
@@ -162,7 +164,15 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		// the stance the attack resolved in, read before it plays: a rise or lunge moves the character afterwards
 		const bool bAirAttack = ContextComponent && ContextComponent->IsAirborne();
 
+		// the last attack's Stall or Glide belongs to it; this one opens its own
+		EndAirMotion();
+
+		// carry on the combo if it's the same ability; otherwise a fresh start, which may open differently (rising opener)
 		FName ChainName = GetChainSection(Ability);
+		if (ChainName.IsNone())
+		{
+			ChainName = GetOpenerSection(Ability);
+		}
 		bAbilityActive = PlayAbilityMontage(Ability, ChainName);
 		ActiveAbility = bAbilityActive ? Ability : nullptr;
 		AttackStartTime = GetWorld()->GetTimeSeconds();
@@ -224,7 +234,7 @@ void UCombatResolverComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		bRecoveryOpen = false;
 	}
 
-	UpdateAirHang(bAttackStarted && bAbilityActive);
+	UpdateAirMotion(DeltaTime);
 
 	if (!bShowDebug && !bShowReticle)
 	{
@@ -273,6 +283,7 @@ void UCombatResolverComponent::HandleMovementInput()
 void UCombatResolverComponent::HandleLanded()
 {
 	bAirAttacksSpent = false;
+	EndAirMotion();
 
 	// a kept press still chains: it resolves on the ground now, e.g. into the Riser under a juggled target
 	if (!IsInRecovery() || bAbilityQueued)
@@ -316,8 +327,8 @@ void UCombatResolverComponent::CancelAttack()
 	ActiveAbility = nullptr;
 	EndComboString(TEXT("attack cancelled"));
 
-	// put gravity back now rather than next tick, so a jump cancel out of an air attack jumps with normal gravity
-	UpdateAirHang(false);
+	// put gravity and air control back now rather than next tick, so a jump cancel out of an air attack jumps normally
+	EndAirMotion();
 }
 
 void UCombatResolverComponent::EndComboString(const TCHAR* Why)
@@ -349,37 +360,151 @@ FString UCombatResolverComponent::DescribeCombo() const
 		Length > 0 && LoadoutComponent->GetComboCount() == Length ? TEXT(" finisher") : TEXT(""));
 }
 
-void UCombatResolverComponent::UpdateAirHang(bool bAttackStarted)
+void UCombatResolverComponent::HandleStallBegin(const UAnimSequenceBase* Animation, const UAnimNotifyState* Window, float GravityScale, bool bStopFall)
 {
 	ACharacter* Char = Cast<ACharacter>(GetOwner());
-	if (!Char)
+	if (!Char || !IsActiveAbilityMontage(Animation) || !Char->GetCharacterMovement()->IsFalling())
 	{
 		return;
 	}
 
+	EndAirMotion();
+
+	// a rise always stops; a fall only with bStopFall
 	UCharacterMovementComponent* Movement = Char->GetCharacterMovement();
-	// the hang lasts while the attack is acting: it ends at the recovery, so the character drops out of a swing it doesn't follow up
-	// (land, then jump again to keep a juggle going), or earlier with an Air Hang Time
-	const bool bHangTimeLeft = ActiveAbility && !IsInRecovery()
-		&& (ActiveAbility->AirHangTime <= 0.f || GetWorld()->GetTimeSeconds() - AttackStartTime < ActiveAbility->AirHangTime);
-	const float HangScale = (bAbilityActive && bHangTimeLeft) ? ActiveAbility->AirHangGravityScale : 1.0f;
-	const bool bShouldHang = HangScale < 1.0f && Movement->IsFalling();
+	Movement->Velocity.Z = bStopFall ? 0.0 : FMath::Min(Movement->Velocity.Z, 0.0);
 
-	if (bShouldHang)
+	AirMotion = EAirMotion::Stall;
+	AirMotionWindow = Window;
+	AttackGravityScale = GravityScale;
+
+	if (bLogHits)
 	{
-		// each attack of an air combo stops the fall, KH style; a rise still going up is stopped too, so the swing happens in place
-		if (bAttackStarted || !bAirHanging)
-		{
-			Movement->Velocity.Z = 0.0;
-		}
-
-		Movement->GravityScale = DefaultGravityScale * HangScale;
-		bAirHanging = true;
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] STALL %s  gravity x%.2f%s  t %.3f"), *GetHitDebugLabel(), GravityScale, bStopFall ? TEXT(", fall stopped") : TEXT(""),
+			GetActiveMontagePosition());
 	}
-	else if (bAirHanging)
+}
+
+void UCombatResolverComponent::HandleGlideBegin(const UAnimSequenceBase* Animation, const UAnimNotifyState* Window, float GravityScale, bool bStopFall, float MaxSpeed, float Stiffness)
+{
+	ACharacter* Char = Cast<ACharacter>(GetOwner());
+	if (!Char || !IsActiveAbilityMontage(Animation) || !Char->GetCharacterMovement()->IsFalling())
 	{
-		Movement->GravityScale = DefaultGravityScale;
-		bAirHanging = false;
+		return;
+	}
+
+	EndAirMotion();
+
+	UCharacterMovementComponent* Movement = Char->GetCharacterMovement();
+	const AActor* Target = ContextComponent ? ContextComponent->GetTarget() : nullptr;
+
+	AirMotionWindow = Window;
+	AttackGravityScale = GravityScale;
+
+	// nothing to glide towards: hang where it is instead
+	if (!Target)
+	{
+		Movement->Velocity.Z = 0.0;
+		AirMotion = EAirMotion::Stall;
+		if (bLogHits)
+		{
+			UE_LOG(LogCombatProto, Log, TEXT("[Hit] GLIDE %s  no target, stalling  gravity x%.2f  t %.3f"), *GetHitDebugLabel(), GravityScale, GetActiveMontagePosition());
+		}
+		return;
+	}
+
+	// a rise still going always stops; the fall too with bStopFall, so the glide starts level and lingers
+	Movement->Velocity.Z = bStopFall ? 0.0 : FMath::Min(Movement->Velocity.Z, 0.0);
+
+	// air control and air braking would fight the spring; they come back when the glide ends
+	SavedAirControl = Movement->AirControl;
+	SavedBrakingDecelerationFalling = Movement->BrakingDecelerationFalling;
+	Movement->AirControl = 0.0f;
+	Movement->BrakingDecelerationFalling = 0.0f;
+
+	AirMotion = EAirMotion::Glide;
+	GlideMaxSpeed = MaxSpeed;
+	GlideStiffness = FMath::Max(Stiffness, 0.1f);
+
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] GLIDE %s  gravity x%.2f%s  max %.0f cm/s  stiffness %.1f  speed in (%.0f, %.0f, %.0f)  %s  t %.3f"), *GetHitDebugLabel(),
+			GravityScale, bStopFall ? TEXT(", fall stopped") : TEXT(""), MaxSpeed, Stiffness, Movement->Velocity.X, Movement->Velocity.Y, Movement->Velocity.Z, *DescribeOffset(GetOwner(), Target),
+			GetActiveMontagePosition());
+	}
+}
+
+void UCombatResolverComponent::HandleAirMotionEnd(const UAnimNotifyState* Window)
+{
+	if (AirMotion != EAirMotion::None && AirMotionWindow.Get() == Window)
+	{
+		EndAirMotion();
+	}
+}
+
+void UCombatResolverComponent::EndAirMotion()
+{
+	ACharacter* Char = Cast<ACharacter>(GetOwner());
+	if (AirMotion == EAirMotion::Glide && Char)
+	{
+		UCharacterMovementComponent* Movement = Char->GetCharacterMovement();
+		Movement->AirControl = SavedAirControl;
+		Movement->BrakingDecelerationFalling = SavedBrakingDecelerationFalling;
+
+		if (bLogHits)
+		{
+			UE_LOG(LogCombatProto, Log, TEXT("[Hit] GLIDE END %s  speed out (%.0f, %.0f, %.0f)"), *GetHitDebugLabel(), Movement->Velocity.X, Movement->Velocity.Y, Movement->Velocity.Z);
+		}
+	}
+
+	AirMotion = EAirMotion::None;
+	AirMotionWindow.Reset();
+	AttackGravityScale = 1.0f;
+}
+
+void UCombatResolverComponent::UpdateAirMotion(float DeltaTime)
+{
+	if (AirMotion == EAirMotion::None)
+	{
+		return;
+	}
+
+	ACharacter* Char = Cast<ACharacter>(GetOwner());
+	UCharacterMovementComponent* Movement = Char ? Char->GetCharacterMovement() : nullptr;
+	if (!Movement || !bAbilityActive || !Movement->IsFalling())
+	{
+		EndAirMotion();
+		return;
+	}
+
+	const AActor* Target = ContextComponent ? ContextComponent->GetTarget() : nullptr;
+	if (AirMotion != EAirMotion::Glide || !Target || DeltaTime <= 0.0f)
+	{
+		return;
+	}
+
+	// where the glide settles: Lunge Stop Distance in front of the target, across only (gravity has the height)
+	const FVector OwnerLocation = Char->GetActorLocation();
+	const FVector ToTarget2D = (Target->GetActorLocation() - OwnerLocation) * FVector(1.0, 1.0, 0.0);
+	const float Distance2D = ToTarget2D.Size();
+	const FVector Direction2D = Distance2D > KINDA_SMALL_NUMBER ? ToTarget2D / Distance2D : Char->GetActorForwardVector();
+	const float StopDistance = ActiveAbility ? ActiveAbility->LungeStopDistance : 100.0f;
+	const FVector Offset = ToTarget2D - Direction2D * FMath::Min(StopDistance, Distance2D);
+
+	// a critically damped spring on the speed across, towards a point that moves with the target: it builds on the speed it has,
+	// eases in, keeps pace with a target being knocked away (damping towards the target's speed, not zero) and settles without overshooting
+	FVector Velocity2D(Movement->Velocity.X, Movement->Velocity.Y, 0.0);
+	const FVector TargetVelocity2D = Target->GetVelocity() * FVector(1.0, 1.0, 0.0);
+	const float W = GlideStiffness;
+	Velocity2D += (Offset * (W * W) + (TargetVelocity2D - Velocity2D) * (2.0f * W)) * DeltaTime;
+	Velocity2D = Velocity2D.GetClampedToMaxSize(GlideMaxSpeed);
+
+	Movement->Velocity.X = Velocity2D.X;
+	Movement->Velocity.Y = Velocity2D.Y;
+
+	if (Distance2D > KINDA_SMALL_NUMBER)
+	{
+		Char->SetActorRotation(FRotator(0.0, Direction2D.Rotation().Yaw, 0.0));
 	}
 }
 
@@ -427,16 +552,49 @@ FName UCombatResolverComponent::GetChainSection(const UCombatAbilityDefinition* 
 
 	FName CurrSelectionName = CurrAnim->Montage_GetCurrentSection(Montage);
 
+	// the rising opener stands in for the first section, so it carries on into the second
+	const FName RisingOpener = ActiveAbility->RisingOpenerSection;
+	if (!RisingOpener.IsNone() && CurrSelectionName == RisingOpener)
+	{
+		return Montage->CompositeSections.Num() > 1 ? Montage->GetSectionName(1) : NAME_None;
+	}
+
 	int32 iAnimIndex = Montage->GetSectionIndex(CurrSelectionName);
 
 	if ( ( iAnimIndex != INDEX_NONE ) && ( iAnimIndex + 1 ) < Montage->CompositeSections.Num())
 	{
-		return Montage->GetSectionName(iAnimIndex + 1);
+		// the string's last section doesn't run on into the rising opener after it
+		const FName NextSection = Montage->GetSectionName(iAnimIndex + 1);
+		return NextSection == RisingOpener ? NAME_None : NextSection;
 	}
 	else
 	{
 		return NAME_None;
 	}
+}
+
+FName UCombatResolverComponent::GetOpenerSection(const UCombatAbilityDefinition* Ability) const
+{
+	if (!Ability || Ability->RisingOpenerSection.IsNone() || !Ability->Montage || Ability->Montage->GetSectionIndex(Ability->RisingOpenerSection) == INDEX_NONE)
+	{
+		return NAME_None;
+	}
+
+	const AActor* Target = ContextComponent ? ContextComponent->GetTarget() : nullptr;
+	if (!Target)
+	{
+		return NAME_None;
+	}
+
+	// KH: an air combo opens upwards at a target above, downwards at one level or below
+	const float Above = Target->GetActorLocation().Z - GetOwner()->GetActorLocation().Z;
+	const bool bRising = Above >= Ability->RisingOpenerMinHeight;
+	if (bLogHits)
+	{
+		UE_LOG(LogCombatProto, Log, TEXT("[Hit] OPENER %s: target %.0f cm %s (rising from %.0f)"), bRising ? TEXT("rising") : TEXT("usual"),
+			FMath::Abs(Above), Above >= 0.0f ? TEXT("above") : TEXT("below"), Ability->RisingOpenerMinHeight);
+	}
+	return bRising ? Ability->RisingOpenerSection : NAME_None;
 }
 
 bool UCombatResolverComponent::IsActiveAbilityMontage(const UAnimSequenceBase* Animation) const
@@ -471,6 +629,17 @@ void UCombatResolverComponent::HandleRecoveryBegin(const UAnimSequenceBase* Anim
 {
 	if (!IsActiveAbilityMontage(Animation))
 	{
+		return;
+	}
+
+	// a recovery never starts on an attack's first frame: that's the previous section's window ending right where this one
+	// starts (jumping to a section lands on its edge), and opening it would let a buffered press cut the new swing off
+	if (GetWorld()->GetTimeSeconds() - AttackStartTime <= KINDA_SMALL_NUMBER)
+	{
+		if (bLogHits)
+		{
+			UE_LOG(LogCombatProto, Log, TEXT("[Hit] RECOVERY IGNORED %s  t %.3f: opened on the attack's first frame"), *GetHitDebugLabel(), GetActiveMontagePosition());
+		}
 		return;
 	}
 
@@ -892,7 +1061,7 @@ void UCombatResolverComponent::StartLunge(const UCombatAbilityDefinition* Abilit
 			{
 				if (bLogHits)
 				{
-					UE_LOG(LogCombatProto, Log, TEXT("[Hit] LUNGE %s skipped: already in place (ground, %s)"), *GetHitDebugLabel(), *DescribeOffset(GetOwner(), Target));
+					UE_LOG(LogCombatProto, Log, TEXT("[Hit] LUNGE %s skipped: already in place (across, %s)"), *GetHitDebugLabel(), *DescribeOffset(GetOwner(), Target));
 				}
 				return;
 			}

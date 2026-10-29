@@ -99,6 +99,13 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input|Look", meta = (ClampMin = 0, Units = "DegreesPerSecond"))
 	float StickPitchRate = 130.0f;
 
+	/**
+	 *  Gravity while falling (going down), as a multiple of the movement component's Gravity Scale: a lighter rise and a quicker
+	 *  drop. 1 = the same both ways. An attack's Stall or Glide window multiplies on top
+	 */
+	UPROPERTY(EditAnywhere, Category = "Movement|Air", meta = (ClampMin = 1))
+	float FallGravityMultiplier = 1.3f;
+
 	/** How far the camera turns per unit of mouse movement, before the player's mouse sensitivity (2.5 matches the engine's old built-in look scale) */
 	UPROPERTY(EditAnywhere, Category = "Input|Look", meta = (ClampMin = 0, Units = "Degrees"))
 	float MouseLookScale = 2.5f;
@@ -149,6 +156,7 @@ public:
 
 protected:
 
+	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void NotifyControllerChanged() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
@@ -177,6 +185,12 @@ protected:
 	void ToggleLockOn();
 
 private:
+
+	/** Sets the movement component's gravity each tick: the base Gravity Scale, times FallGravityMultiplier when going down, times the attack's Stall or Glide gravity */
+	void UpdateGravity();
+
+	/** The movement component's Gravity Scale at BeginPlay; everything UpdateGravity sets is relative to it */
+	float BaseGravityScale = 1.0f;
 
 	/** Turns the camera towards the movement direction when the player isn't steering it (see Camera|Follow) */
 	void UpdateFollowCamera(float DeltaSeconds);
