@@ -140,6 +140,31 @@ Checklist for turning an animation into an attack. Several of these fail silentl
 - **After the air string's last hit** (the finisher, or the montage's third hit with no finisher slotted), air attacks are spent until the character lands: attack presses in the air are ignored, so the finisher's recovery lasts to the ground instead of starting another air string. Movement can still cut the recovery; the character just falls. The debug text shows "air attacks spent until landing" meanwhile.
 - **Juggle loop:** to keep a target up, skip the finisher. Jump, do two air hits, let yourself drop, land, and jump again; landing ends the air string, so the next jump starts a fresh one. Each air hit holds the target for its Hit Stun (0.9 s), and it floats down after that.
 
+## Controls
+
+| Action | Gamepad | Keyboard and mouse | Mapping name |
+| --- | --- | --- | --- |
+| Move | Left stick | WASD (arrows as a second slot) | `Move` (stick), `MoveForward` / `MoveBackward` / `MoveLeft` / `MoveRight` |
+| Camera | Right stick | Mouse | `Look` (stick; the mouse isn't rebindable) |
+| Jump | A / Cross | Space | `Jump` |
+| Attack | X / Square | Left mouse button | `Attack` |
+
+The rest of the design doc's layout (dodge, swap, lock-on, alternate attack, guard) gets bound as each mechanic is built.
+
+**Rebinding** goes through Enhanced Input's user settings (`UCombatInputUserSettings`, set as the User Settings Class in Project Settings > Enhanced Input). An action is rebindable when its Input Action has **Player Mappable Key Settings** with a name; keyboard WASD overrides the name per key in `IMC_Default` so each direction can move on its own. Pad and keyboard/mouse bindings are kept apart, so rebinding one never touches the other. Rebinds and look options save to `Saved/SaveGames/EnhancedInputUserSettings.sav`; delete it to start from the defaults.
+
+**Presets** are key profiles. `IMC_Default` has a `ShoulderAttack` override (Attack on RB / R1, the design doc's Shoulder attack preset); the default profile is the one above. Rebinds are kept per profile.
+
+Until there's a menu, use the console in PIE:
+
+- `Combat.Input.List`: every mapping with its pad and keyboard keys (customised ones show their default), the active profile and the look settings.
+- `Combat.Input.Rebind <Mapping> <Key> [Slot]`, e.g. `Combat.Input.Rebind Attack Gamepad_RightShoulder`. A pad key changes the pad binding, any other key the keyboard/mouse one. Key names are Unreal's (`SpaceBar`, `LeftMouseButton`, `Gamepad_FaceButton_Left`, `Gamepad_RightTrigger`). The log warns when the key is also on another action.
+- `Combat.Input.Reset [Mapping]`: one mapping, or all of them, back to the profile's defaults.
+- `Combat.Input.Profile <ShoulderAttack|Default>`: switches preset.
+- `Combat.Input.Look <stick|mouse> <Sensitivity> [InvertY 0|1]`, e.g. `Combat.Input.Look stick 1.4 1`.
+
+**Camera speed:** the right stick turns at **Stick Yaw Rate** / **Stick Pitch Rate** (200 / 130 degrees per second at full tilt, on the character under Input|Look) times the player's stick sensitivity, so it doesn't change with the frame rate. The mouse turns **Mouse Look Scale** (2.5) degrees per unit of movement times the mouse sensitivity. The engine's legacy input scales are off (`bEnableLegacyInputScales=False` in `DefaultInput.ini`); they used to multiply look input by 2.5 and flip the stick's pitch.
+
 ## Third-party content
 
 Some assets come from Fab and are not stored in Git; a fresh clone needs them re-added before the project opens cleanly.

@@ -11,6 +11,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Input/CombatInputUserSettings.h"
 #include "InputActionValue.h"
 #include "Kismet/GameplayStatics.h"
 #include "Loadout/CombatLoadoutComponent.h"
@@ -79,8 +80,14 @@ void ACombatCharacter::NotifyControllerChanged()
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
 		{
+			UEnhancedInputUserSettings* UserSettings = Subsystem->GetUserSettings();
 			for (const UInputMappingContext* MappingContext : DefaultMappingContexts)
 			{
+				// registering makes the context's rebindable keys show up in the player's settings, with their saved rebinds applied
+				if (UserSettings)
+				{
+					UserSettings->RegisterInputMappingContext(MappingContext);
+				}
 				Subsystem->AddMappingContext(MappingContext, 0);
 			}
 		}
@@ -96,8 +103,8 @@ void ACombatCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACombatCharacter::Move);
 
-		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::Look);
-		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::Look);
+		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::StickLook);
+		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ACombatCharacter::MouseLook);
 
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACombatCharacter::Attack);
 	}
@@ -148,14 +155,32 @@ void ACombatCharacter::Move(const FInputActionValue& Value)
 	}
 }
 
-void ACombatCharacter::Look(const FInputActionValue& Value)
+void ACombatCharacter::StickLook(const FInputActionValue& Value)
 {
-	const FVector2D LookAxisVector = Value.Get<FVector2D>();
+	const FVector2D Stick = Value.Get<FVector2D>();
+	const UCombatInputUserSettings* Settings = UCombatInputUserSettings::Get(Cast<APlayerController>(GetController()));
+	const float Sensitivity = Settings ? Settings->StickLookSensitivity : 1.0f;
+	const float InvertY = Settings && Settings->bInvertStickY ? -1.0f : 1.0f;
+	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
 
 	if (GetController() != nullptr)
 	{
-		AddControllerYawInput(LookAxisVector.X);
-		AddControllerPitchInput(LookAxisVector.Y);
+		AddControllerYawInput(Stick.X * StickYawRate * Sensitivity * DeltaSeconds);
+		AddControllerPitchInput(Stick.Y * StickPitchRate * Sensitivity * InvertY * DeltaSeconds);
+	}
+}
+
+void ACombatCharacter::MouseLook(const FInputActionValue& Value)
+{
+	const FVector2D Mouse = Value.Get<FVector2D>();
+	const UCombatInputUserSettings* Settings = UCombatInputUserSettings::Get(Cast<APlayerController>(GetController()));
+	const float Sensitivity = Settings ? Settings->MouseLookSensitivity : 1.0f;
+	const float InvertY = Settings && Settings->bInvertMouseY ? -1.0f : 1.0f;
+
+	if (GetController() != nullptr)
+	{
+		AddControllerYawInput(Mouse.X * MouseLookScale * Sensitivity);
+		AddControllerPitchInput(Mouse.Y * MouseLookScale * Sensitivity * InvertY);
 	}
 }
 

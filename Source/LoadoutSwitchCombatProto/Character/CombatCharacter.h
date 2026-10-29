@@ -82,6 +82,18 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> AttackAction;
 
+	/** How fast a full right-stick push turns the camera sideways, before the player's stick sensitivity */
+	UPROPERTY(EditAnywhere, Category = "Input|Look", meta = (ClampMin = 0, Units = "DegreesPerSecond"))
+	float StickYawRate = 200.0f;
+
+	/** How fast a full right-stick push tilts the camera up or down, before the player's stick sensitivity */
+	UPROPERTY(EditAnywhere, Category = "Input|Look", meta = (ClampMin = 0, Units = "DegreesPerSecond"))
+	float StickPitchRate = 130.0f;
+
+	/** How far the camera turns per unit of mouse movement, before the player's mouse sensitivity (2.5 matches the engine's old built-in look scale) */
+	UPROPERTY(EditAnywhere, Category = "Input|Look", meta = (ClampMin = 0, Units = "Degrees"))
+	float MouseLookScale = 2.5f;
+
 	/** Enemies further away than this are never picked. Also scales the distance part of a candidate's score */
 	UPROPERTY(EditAnywhere, Category = "Targeting", meta = (ClampMin = 1, Units = "cm"))
 	float TargetMaxDistance = 2000.0f;
@@ -122,7 +134,13 @@ protected:
 	virtual void Landed(const FHitResult& Hit) override;
 
 	void Move(const FInputActionValue& Value);
-	void Look(const FInputActionValue& Value);
+
+	/** Right stick: turns at the stick rates, so the camera speed doesn't depend on the frame rate */
+	void StickLook(const FInputActionValue& Value);
+
+	/** Mouse: turns by however far the mouse moved */
+	void MouseLook(const FInputActionValue& Value);
+
 	void Attack();
 
 private:
