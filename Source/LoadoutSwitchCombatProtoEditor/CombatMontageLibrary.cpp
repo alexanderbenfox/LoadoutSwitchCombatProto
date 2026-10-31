@@ -4,7 +4,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/Package.h"
 
-UAnimMontage* UCombatMontageLibrary::BuildComboMontage(const FString& AssetPath, const TArray<UAnimSequence*>& Hits, FName SlotName)
+UAnimMontage* UCombatMontageLibrary::BuildComboMontage(const FString& AssetPath, const TArray<UAnimSequence*>& Hits, FName SlotName, const TArray<float>& PlayRates)
 {
 	if (Hits.IsEmpty() || Hits.Contains(nullptr))
 	{
@@ -24,6 +24,16 @@ UAnimMontage* UCombatMontageLibrary::BuildComboMontage(const FString& AssetPath,
 	Montage->Modify();
 	Montage->SetSkeleton(Hits[0]->GetSkeleton());
 
+	// the rates hits already play at, so a rebuild that doesn't pass PlayRates doesn't undo a slowed or sped up hit
+	TMap<const UAnimSequenceBase*, float> PreviousRates;
+	for (const FSlotAnimationTrack& OldTrack : Montage->SlotAnimTracks)
+	{
+		for (const FAnimSegment& OldSegment : OldTrack.AnimTrack.AnimSegments)
+		{
+			PreviousRates.Add(OldSegment.GetAnimReference(), OldSegment.AnimPlayRate);
+		}
+	}
+
 	// one slot track holding every hit back to back
 	Montage->SlotAnimTracks.Reset();
 	FSlotAnimationTrack& Track = Montage->SlotAnimTracks.AddDefaulted_GetRef();
@@ -31,11 +41,20 @@ UAnimMontage* UCombatMontageLibrary::BuildComboMontage(const FString& AssetPath,
 
 	TArray<float> HitStartTimes;
 	float Position = 0.0f;
-	for (UAnimSequence* Hit : Hits)
+	for (int32 i = 0; i < Hits.Num(); i++)
 	{
+		UAnimSequence* Hit = Hits[i];
 		FAnimSegment Segment;
 		Segment.SetAnimReference(Hit, true);
 		Segment.StartPos = Position;
+		if (PlayRates.IsValidIndex(i) && PlayRates[i] > 0.0f)
+		{
+			Segment.AnimPlayRate = PlayRates[i];
+		}
+		else if (const float* PreviousRate = PreviousRates.Find(Hit))
+		{
+			Segment.AnimPlayRate = *PreviousRate;
+		}
 		Track.AnimTrack.AnimSegments.Add(Segment);
 
 		HitStartTimes.Add(Position);

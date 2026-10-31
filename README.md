@@ -126,7 +126,7 @@ Checklist for turning an animation into an attack. Several of these fail silentl
 - The on-screen debug shows the string as `Combo: 2/4 ground`, and each ATTACK message and log line has the count.
 - The current finishers, `TestFinisher` (ground: knocks the target far away with a small pop) and `TestFinisherAir` (spikes it down), both use the `Manny_Ability_R` overhead slam as a placeholder. Their montages are built by a script like the air combo's.
 
-**Building a combo montage from a script.** `UCombatMontageLibrary::BuildComboMontage` (editor module) does steps 1–3 and the Blend Out Trigger Time in one go: give it an asset path and the hit sequences in order. Rerunning it on an existing montage rebuilds its track and sections. `Manny_AirCombo_Montage` was made this way, with its notifies laid out per hit; to swap in real air attacks, change the sequence list and rerun (ask Claude, or call it from editor Python as `unreal.CombatMontageLibrary.build_combo_montage(path, [seq, ...])`).
+**Building a combo montage from a script.** `UCombatMontageLibrary::BuildComboMontage` (editor module) does steps 1–3 and the Blend Out Trigger Time in one go: give it an asset path and the hit sequences in order. Rerunning it on an existing montage rebuilds its track and sections. `Manny_AirCombo_Montage` was made this way, with its notifies laid out per hit; to swap in real air attacks, change the sequence list and rerun (ask Claude, or call it from editor Python as `unreal.CombatMontageLibrary.build_combo_montage(path, [seq, ...], "DefaultSlot", [rate, ...])`). The rates slow down or speed up single hits (hit B of `Manny_PrimaryCombo_Montage` plays at 0.8); pass an empty list to keep the rates the hits already have.
 
 ### Air attacks
 
